@@ -186,5 +186,4 @@ for(fff in 0:18) {
 
 # Save as DTA and RDS files --------------
 
-lau %>% saveRDS(file = paste0(box_directory, 'ShaleGas/Opioids/R/scratch/lau_1995_2016.rds'))
-lau %>% write.dta(file = paste0(box_directory, 'ShaleGas/Opioids/R/scratch/lau_1995_2016.dta'))
+lau %>% saveRDS(file = paste0('shale-varying/Data/LAUS/lau_1995_2016.rds'))

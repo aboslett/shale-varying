@@ -218,7 +218,7 @@ for(fff in zipped_folders) {
   
 }
 
-# Extract all yearly files 
+# Extract all yearly files (county data)
 # Notes: Use most generalized file.
 
 qcew <- data.frame()
@@ -261,9 +261,136 @@ for(fff in 0:18) {
   
 }
 
-# Save as RDS file 
+# Save as RDS file (county data)
 
-qcew %>% saveRDS('shale-varying/Scratch/QCEW_Data_2000_2018.rds')
+qcew %>% saveRDS('shale-varying/Scratch/QCEW_County_Data_2000_2018.rds')
+
+# QCEW (State-wide, refined industry -------------------------------------
+# Note: These data are different in that they provide estimates of employment/income by state/county with very refined
+# NAICS codes.
+
+dir.create('shale-varying/Data/QCEW_Refined')
+
+# Download data
+# Note: From this link. https://data.bls.gov/cew/data/files/[year]/csv/[year]_annual_by_area.zip
+
+for(fff in 2000:2018) {
+  
+  # Download file
+  
+  temp <- tempfile()
+  
+  download.file(paste0('https://data.bls.gov/cew/data/files/', as.character(fff), 
+                       '/csv/', as.character(fff), '_annual_by_area.zip'),
+                paste0('shale-varying/Data/QCEW_Refined/qcew_refined_', as.character(fff), '.zip'))
+  
+}
+
+# Extract all files in folders in QCEW folder
+
+zipped_folders <- list.files(path = "shale-varying/Data/QCEW_Refined", pattern = "*.zip")
+
+for(fff in zipped_folders) {
+  
+  unzip(paste0('shale-varying/Data/QCEW_Refined/', fff), exdir = 'shale-varying/Data/QCEW_Refined')
+  
+}
+
+# Delete zipped folders
+# Note: Can keep it if you prefer, but the size of the files is pretty large.
+
+file.remove(paste0('shale-varying/Data/QCEW_Refined/', zipped_folders))
+
+rm(zipped_folders)
+
+# # Extract all yearly files (state data)
+# Notes: Use most generalized file.
+
+qcew_state <- data.frame()
+
+for(fff in 2000:2018) {
+  
+  # Grab statewide files
+  
+  temp_files <- list.files(path = paste0('shale-varying/Data/QCEW_Refined/', as.character(fff),
+                                         '.annual.by_area'),
+                           pattern = 'Statewide\\.csv')
+  
+  # Add data frame for merging
+  
+  temp_qcew <- data.frame()
+  
+  # Set up loop for reading/cleaning
+  
+  for(ggg in temp_files) {
+    
+    # Read CSV file
+    
+    temp <- read_csv(paste0('shale-varying/Data/QCEW_Refined/', as.character(fff),
+                            '.annual.by_area/', ggg), col_names = TRUE)
+    
+    # Filter NAICS codes for all + oil and gas extraction
+    
+    temp$industry_code %<>% as.character()
+    
+    temp %<>% filter(industry_code %in% c('10', '211') & own_title %in% c('Private'))
+  
+    
+    # Select relevant variables
+    
+    temp %<>% dplyr::select(area_fips, area_title, year, industry_code,
+                            annual_avg_emplvl, total_annual_wages, avg_annual_pay) 
+    
+    # Make all variables character
+    
+    temp %<>% mutate_at(vars(area_fips, area_title, industry_code),
+                        funs(as.character(.)))
+    
+    # Attach data to QCEW data
+    
+    temp_qcew %<>% bind_rows(temp)
+   
+    # Remove files
+    
+    rm(temp, ggg)
+    
+  }
+
+  # Bind to larger data frame
+  
+  qcew_state %<>% bind_rows(temp_qcew)
+  
+  # Print progress
+  
+  print(fff)
+  
+  # Remove files
+  
+  rm(temp_qcew, fff)
+  
+}
+
+# Clean bound data
+
+qcew_state %<>% rename(state_fips_code = area_fips,
+                       state_name = area_title) %>%
+  mutate(state_fips_code = str_sub(state_fips_code, end = 2),
+         state_name = str_extract(state_name, pattern = '.*(?=(\\s\\-\\-))')) %>%
+  rename(employment = annual_avg_emplvl,
+         wages = total_annual_wages,
+         average_wages = avg_annual_pay) %>%
+  mutate(industry_code = ifelse(industry_code == '10', 'total', 'og')) %>%
+  setDT() %>%
+  dcast(state_fips_code + state_name + year ~ industry_code, value.var = c('employment', 'wages', 'average_wages'))
+
+qcew_state %<>% mutate(
+  employment_prop_og = employment_og / employment_total,
+  wages_prop_og = wages_og / wages_total
+)
+
+# Save as RDS file (state data)
+
+qcew_state %>% saveRDS('shale-varying/Scratch/QCEW_State_Data_2000_2018.rds')
 
 # Oil and gas production data ---------------------------------
 # Note: County-level data from 2000 onward. These data are from work performed by Elaine Hill's lab. I reference
@@ -294,15 +421,16 @@ oil_and_gas_production_data_ers <- read_excel('shale-varying/Data/ERS/oilgascoun
 
 oil_and_gas_production_data_ers %<>% dplyr::select(county_fips_code = geoid,
                                                    county_name = County_Name,
+                                                   state_abbreviation = Stabr,
                                                    starts_with('oil20'),
                                                    starts_with('gas20'))
 
 # Wide-to-long transformation
 
-oil_and_gas_production_data_ers %<>% gather(variable, value, -county_fips_code, -county_name) %>%
+oil_and_gas_production_data_ers %<>% gather(variable, value, -county_fips_code, -county_name, -state_abbreviation) %>%
   mutate(year = as.numeric(str_sub(variable, start = 4)),
          energy = str_sub(variable, end = 3)) %>%
-  dcast(county_fips_code + county_name + year ~ energy, value.var = c('value'))
+  dcast(county_fips_code + county_name + state_abbreviation + year ~ energy, value.var = c('value'))
 
 # Clean data (Hill Lab)
 
@@ -328,8 +456,7 @@ oil_and_gas_production_data %<>% filter(!(fips_code %in% oil_and_gas_production_
 # Rename oil and gas production data for joining with ERS data
 
 oil_and_gas_production_data %<>% rename(county_fips_code = fips_code,
-                                        county_name = county, oil = oil_production, gas = gas_production) %>%
-  dplyr::select(-state_abbreviation)
+                                        county_name = county, oil = oil_production, gas = gas_production)
 
 # Bind data together
 
@@ -403,90 +530,6 @@ recent_pop %<>% filter(year >= 2000)
 # Save as RDS file 
 
 recent_pop %>% saveRDS('shale-varying/Scratch/SEER_Population_Data_2000_2018.rds')
-
-# County Business Patterns -----------------------------
-# Notes: Abboud and Betz (2021) use these data in their evaluation of shale development. I probably won't use these data
-# but we'll see.
-
-# Create directory
-
-dir.create('shale-varying/Data/CBP')
-
-# Download and unzip data
-
-for(fff in 2000:2018) {
-  
-  ggg <- ifelse(str_length(as.character(fff - 2000)) == 1, paste0('0', as.character(fff - 2000)), as.character(fff - 2000))
-  
-  # Download file
-  
-  temp <- tempfile()
-  
-  download.file(paste0('https://www2.census.gov/programs-surveys/cbp/datasets/', as.character(fff), 
-                       '/cbp', as.character(ggg), 'co.zip'),
-                paste0('shale-varying/Data/CBP/cbp_', as.character(fff), '.zip'))
-  
-  # Extract contents into folder
-  
-  unzip(paste0('shale-varying/Data/CBP/cbp_', as.character(fff), '.zip'), exdir = 'shale-varying/Data/CBP')
-  
-}
-
-# Import and clean files
-
-cbp_data <- data.frame()
-
-cbp_files <- list.files(path = 'shale-varying/Data/CBP', pattern = '*.txt')
-
-for(fff in cbp_files) {
-  
-    temp <- read_delim(file = paste0('shale-varying/Data/CBP/', fff),
-                       delim = ',', col_names = TRUE)
-    
-    # Make all variable names lowercase (for 15-18)
-    
-    names(temp) %<>% str_to_lower()
-    
-    # Select variables of interest and add county FIPS code
-    
-    temp %<>% mutate(county_fips_code = paste0(fipstate, fipscty),
-                     year = 2000 + as.numeric(str_sub(fff, start = 4, end = 5))) %>%
-      dplyr::select(county_fips_code, year, contains('nai'),
-                    emp, ap, est)
-    
-    # Grab two-digit NAICS and oil and gas-extract NAICS (211)
-    
-    temp$naics %<>% str_replace_all(pattern = '[:punct:]',
-                                    replacement = '') %>%
-      str_trim()
-    
-    temp %<>% filter(naics == '' | str_length(naics) == 2 | naics == '211')
-    
-    # Long-to-wide
-    
-    temp %<>% mutate(naics = paste0('naics_', naics)) %>%
-      setDT() %>%
-      dcast(county_fips_code + year ~ naics, value.var = c('emp', 'ap', 'est'))
-    
-    # Bind to data frame
-    
-    cbp_data %<>% bind_rows(temp)
-    
-    # Remove files and print progress
-    
-    print(fff)
-    
-    rm(temp, fff)
-    
-}
-
-# Arrange data
-
-cbp_data %<>% arrange(county_fips_code, year)
-
-# Save data as RDS
-
-cbp_data %>% saveRDS('shale-varying/Scratch/CBP_Data_2000_2018.rds')
 
 # SOI Tax Income data ---------------------------------
 # Notes: See Feyrer et al. (2017) (and associated comment from James & Smith). These data are based on residence

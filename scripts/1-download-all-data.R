@@ -579,3 +579,33 @@ for(fff in zipped_folders) {
   unzip(paste0('shale-varying/Data/SOI/', fff), exdir = 'shale-varying/Data/SOI')
   
 }
+# Shale play timing --------------------------
+# Note: I don't buy this timing...yet...but I am going to bring it in anyway as a starting point for defining when
+# shale development happened in a particular play. This is from Bartik et al. (2019) in the American Economic Review (Applied).
+# Some of these years don't resonate with me but some serious shoe-leather went into their work (see their Appendix). We'll have to check
+# this out and square with some production/drilling data + employment shares in O&G Extraction.
+
+# Create directory
+
+dir.create('shale-varying/Data/Bartik')
+
+# Import by hand
+# Note: Will get around to OCRing this image for fun.
+
+shale_timing <- data.frame(shale_play = c('Woodford-Anadarko', 'Marcellus', 'Utica', 
+                           'Woodford-Ardmore', 'Fayetteville', 'Woodford-Arkoma',
+                           'Niobrara-Denver', 'Barnett', 'Niobrara-Greater Green River',
+                           'Permian, all plays', 'Niobrara-Powder River', 'Haynesville',
+                           'Eagle Ford', 'Bakken'),
+                           shale_basin = c('Anadarko', 'Appalachian', 'Appalachian',
+                                           'Ardmore', 'Arkoma', 'Arkoma', 'Denver',
+                                           'Fort Worth', 'Greater Green River', 'Permian',
+                                           'Powder River', 'TX-LA-MS-Salt', 'Western Gulf',
+                                           'Williston Basin'),
+                           first_frac_year = c(2008, 2008, 2012, 2007, 2005, 2006, 
+                                               2010, 2001, 2012, 2005, 2010, 2008,
+                                               2009, 2007))
+
+# Save as RDS file
+
+shale_timing %>% saveRDS('shale-varying/Data/Bartik/Shale_Play_Development_Timing.rds')

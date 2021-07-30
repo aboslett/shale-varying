@@ -38,6 +38,7 @@ library(zoo)
 library(maps)
 library(tidycensus)
 library(vcd)
+library(fuzzyjoin)
 
 # One directories of interest here:
 # (1) My personal directory, which connects my Box folder on my external hard-drive.

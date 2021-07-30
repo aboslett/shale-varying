@@ -39,7 +39,7 @@ closest = "ALL",
 closest_count = "",
 method = "PLANAR")
 
-# My attempt at copying over the tables in a .msb from my local drive to the Box Sync folder.
+# Export data table to a CSV file in the Box scratch folder
 
 arcpy.TableToTable_conversion(
 in_rows = os.path.join(box_dir + '/shale-varying/Scratch/' + 'Spatial_Data.gdb' + '/USCB_County_to_USEIA_Shale_Play'),

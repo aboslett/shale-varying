@@ -609,3 +609,97 @@ shale_timing <- data.frame(shale_play = c('Woodford-Anadarko', 'Marcellus', 'Uti
 # Save as RDS file
 
 shale_timing %>% saveRDS('shale-varying/Data/Bartik/Shale_Play_Development_Timing.rds')
+
+# Mapping shale plays to counties -----------------------------------
+# Notes: In this part of the code, I download shapefile data from the U.S. Energy Information Administration on locations of
+# shale plays in the U.S. I also download county shapefile data from the U.S. Census Bureau. I then use a Python script (1-spatial-data-gathering.py)
+# to estimate the distance from each county in the U.S. to the near(est) shale plays.
+
+# Create GIS directory
+
+dir.create('shale-varying/Data/GIS')
+
+# Download shapefiles
+
+# EIA shapefile data: https://www.eia.gov/maps/map_data/TightOil_ShaleGas_Plays_Lower48_EIA.zip
+
+download.file('https://www.eia.gov/maps/map_data/TightOil_ShaleGas_Plays_Lower48_EIA.zip',
+              'shale-varying/Data/GIS/TightOil_ShaleGas_Plays_Lower48_EIA.zip')
+
+unzip(paste0('shale-varying/Data/GIS/TightOil_ShaleGas_Plays_Lower48_EIA.zip'), exdir = 'shale-varying/Data/GIS')
+  
+# U.S. CB county-shapefile data: 
+
+download.file('https://www2.census.gov/geo/tiger/TIGER2020/COUNTY/tl_2020_us_county.zip',
+              'shale-varying/Data/GIS/tl_2020_us_county.zip')
+
+unzip(paste0('shale-varying/Data/GIS/tl_2020_us_county.zip'), exdir = 'shale-varying/Data/GIS')
+
+# Import distance between two shapefiles
+
+temp_distance <- read_csv('shale-varying/Scratch/USCB_County_to_USEIA_Shale_Play_50Miles.csv')
+
+# Import shapefiles
+
+county_shp <- readOGR(dsn = 'shale-varying/Data/GIS',
+                      layer = 'tl_2020_us_county',
+                      verbose = TRUE) %>% as.data.frame() %>%
+  mutate(FID = row_number() - 1)
+
+shale_shp <- readOGR(dsn = 'shale-varying/Data/GIS',
+                     layer = 'ShalePlays_US_EIA_Sep2019',
+                     verbose = TRUE) %>% as.data.frame() %>%
+  mutate(FID = row_number() - 1)
+
+# Clean the shapefiles
+
+county_shp %<>% dplyr::select(FID, county_fips_code = GEOID)
+
+shale_shp %<>% dplyr::select(FID, contains('Shale'), shale_basin = Basin)
+
+# Clean the distance file
+
+temp_distance %<>% dplyr::select(contains('FID'), NEAR_DIST)
+
+# Join features to distance table
+
+temp_distance %<>% left_join(county_shp, by = c('NEAR_FID' = 'FID')) %>%
+                   left_join(shale_shp, by = c('IN_FID' = 'FID')) %>%
+  dplyr::select(-contains('FID'))
+
+# Import classifications from Bartik paper
+# Note: See code above. This will 
+# Create distance matrix
+
+shale_timing <- readRDS('shale-varying/Data/Bartik/Shale_Play_Development_Timing.rds')
+
+# Map shale plays from shapefile to shale play name from Bartik
+
+temp_distance %>% dplyr::select(Shale_play) %>%
+  unique() %>% 
+  filter(!Shale_play %in% shale_timing$shale_play)
+
+shale_plays_eia <- shale_shp %>% dplyr::select(shale_play = Shale_play,
+                                               shale_basin) %>%
+  unique()
+
+shale_play_bartik <- shale_timing %>% dplyr::select(shale_play, shale_basin)
+
+stringdist_join(shale_plays_eia, shale_play_bartik, 
+                by = "shale_play",
+                mode = "full",
+                ignore_case = TRUE, 
+                method = "jw", 
+                max_dist = 99, 
+                distance_col = "dist") -> string_matches
+
+names(string_matches) %<>% str_replace_all(pattern = '\\.x', replacement = '_eia') %>%
+  str_replace_all(pattern = '\\.y', replacement = '_bartik')
+
+string_matches %<>% arrange(dist) %>%
+  group_by(shale_play_eia) %>%
+  filter(row_number() <= 3) %>%
+  ungroup()
+
+  group_by(name.x) %>%
+  slice_min(order_by = dist, n = 1)

@@ -642,12 +642,12 @@ temp_distance <- read_csv('shale-varying/Scratch/USCB_County_to_USEIA_Shale_Play
 # Import shapefiles
 
 county_shp <- readOGR(dsn = 'shale-varying/Data/GIS',
-                      layer = 'tl_2020_us_county',
+                      layer = 'tl_2020_us_county_prj',
                       verbose = TRUE) %>% as.data.frame() %>%
   mutate(FID = row_number() - 1)
 
 shale_shp <- readOGR(dsn = 'shale-varying/Data/GIS',
-                     layer = 'ShalePlays_US_EIA_Sep2019',
+                     layer = 'ShalePlays_US_EIA_Sep2019_prj',
                      verbose = TRUE) %>% as.data.frame() %>%
   mutate(FID = row_number() - 1)
 
@@ -657,15 +657,19 @@ county_shp %<>% dplyr::select(FID, county_fips_code = GEOID)
 
 shale_shp %<>% dplyr::select(FID, contains('Shale'), shale_basin = Basin)
 
+shale_shp %<>% rename(shale_play = Shale_play)
+
 # Clean the distance file
 
 temp_distance %<>% dplyr::select(contains('FID'), NEAR_DIST)
 
 # Join features to distance table
 
-temp_distance %<>% left_join(county_shp, by = c('NEAR_FID' = 'FID')) %>%
-                   left_join(shale_shp, by = c('IN_FID' = 'FID')) %>%
+temp_distance %<>% left_join(shale_shp, by = c('NEAR_FID' = 'FID')) %>%
+                   left_join(county_shp, by = c('IN_FID' = 'FID')) %>%
   dplyr::select(-contains('FID'))
+
+names(temp_distance) %<>% str_to_lower()
 
 # Import classifications from Bartik paper
 # Note: See code above. This will 
@@ -675,31 +679,60 @@ shale_timing <- readRDS('shale-varying/Data/Bartik/Shale_Play_Development_Timing
 
 # Map shale plays from shapefile to shale play name from Bartik
 
-temp_distance %>% dplyr::select(Shale_play) %>%
-  unique() %>% 
-  filter(!Shale_play %in% shale_timing$shale_play)
+# Rename some plays in the EIA file by hand and extract unique plays
 
-shale_plays_eia <- shale_shp %>% dplyr::select(shale_play = Shale_play,
-                                               shale_basin) %>%
-  unique()
+rename_shales <- function(df) {
+  
+  df %<>% mutate(shale_play = ifelse(shale_basin == 'Permian', 'Permian, all plays', shale_play),
+                 shale_play = ifelse(shale_basin == 'Powder River', 'Niobrara-Powder River', shale_play),
+                 shale_play = ifelse(shale_basin == 'Williston', 'Bakken', shale_play),
+                 shale_play = ifelse(shale_basin == 'Greater Green River', 'Niobrara-Greater Green River', shale_play),
+                 shale_play = ifelse(str_detect(shale_basin, pattern = 'Denver') | str_detect(shale_play, pattern = 'Denver'), 'Niobrara-Denver', shale_play),
+                 shale_play = ifelse(str_detect(shale_play, 'Woodford$') == TRUE, paste0(shale_play, '-', shale_basin), shale_play))
+  
+  df$shale_play %<>% str_replace_all(pattern = 'Caney', 'Arkoma') %>%
+    str_replace_all(pattern = '\\-Bossier', replacement = '')
+  
+  return(df)
+  
+}
 
-shale_play_bartik <- shale_timing %>% dplyr::select(shale_play, shale_basin)
+shale_shp <- rename_shales(shale_shp)
+temp_distance <- rename_shales(temp_distance)
 
-stringdist_join(shale_plays_eia, shale_play_bartik, 
-                by = "shale_play",
-                mode = "full",
-                ignore_case = TRUE, 
-                method = "jw", 
-                max_dist = 99, 
-                distance_col = "dist") -> string_matches
+shale_timing %>% filter(!shale_play %in% shale_shp$shale_play) %>% nrow() == 0
 
-names(string_matches) %<>% str_replace_all(pattern = '\\.x', replacement = '_eia') %>%
-  str_replace_all(pattern = '\\.y', replacement = '_bartik')
+# Bartik et al. (2019) used the Modern Shale Gas Development in the U.S. - An Update paper to define
+# which shale plays they looked at. As you'll notice from the script, there are a number of plays that
+# have seen only limited activity. However, there were a few shale plays that were active beyond a frontier
+# state that were not included in their sample:
+# (1) Antrim Shale (Michigan)
+# (2) New Albany Shale (Illinois)
+# We will keep these shales in our database, plus those that are in their paper, moving forward. We'll label all other
+# shales as non-active shales in our database.
 
-string_matches %<>% arrange(dist) %>%
-  group_by(shale_play_eia) %>%
-  filter(row_number() <= 3) %>%
-  ungroup()
+temp_distance %<>% mutate(shale_play = case_when(
+  shale_play %in% shale_timing$shale_play | shale_play %in% c('New Albany', 'Antrim') ~ shale_play,
+  !(shale_play %in% shale_timing$shale_play | shale_play %in% c('New Albany', 'Antrim')) ~ 'non_active_shale'
+))
 
-  group_by(name.x) %>%
-  slice_min(order_by = dist, n = 1)
+# Reshape-wide
+
+temp_distance %<>% dplyr::select(county_fips_code, shale_play, near_dist) %>%
+  arrange(county_fips_code, shale_play, near_dist) %>%
+  group_by(county_fips_code, shale_play) %>%
+  filter(row_number() == 1) %>%
+  ungroup() %>%
+  dcast(county_fips_code ~ shale_play, value.var = c('near_dist'))
+
+# Generate binary-version of distance table
+
+temp_distance %<>% mutate_at(vars(Antrim:`Woodford-Arkoma`),
+                             funs(ifelse(is.na(.) == TRUE, 50000, .))) %>%
+  mutate_at(vars(Antrim:`Woodford-Arkoma`),
+            funs(ifelse(. == 0, 1, 0))) -> distance_dummies
+
+# Save files as RDS files
+
+temp_distance %>% saveRDS('shale-varying/Scratch/County_to_Shale_Distance_File_50mi.rds')
+distance_dummies %>% saveRDS('shale-varying/Scratch/County_to_Shale_Distance_File_Dummy.rds')

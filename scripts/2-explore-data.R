@@ -98,3 +98,117 @@ qcew_plot
 
 ggsave('shale-varying/Figures/Figure_X_Proportion_of_Private_Employment_OG_Extraction.jpg')
 
+# Compare Bartik et al. timing with shale production numbers by state ---------------------------
+
+rm(list = ls())
+
+# Import oil and gas spud data
+
+well_counts <- readRDS('shale-varying/Scratch/County_Well_Counts_by_Year_2000_2017.rds')
+
+# Import Bartik-timing
+
+shale_timing <- readRDS('shale-varying/Data/Bartik/Shale_Play_Development_Timing.rds')
+
+# Import county mapping to shale
+
+distance_dummies <- readRDS('shale-varying/Scratch/County_to_Shale_Distance_File_Dummy.rds')
+
+# Steps in joining
+# (1) Get county key dataframe
+# Note: Use county shapefile USCB
+
+county_shp <- readOGR(dsn = 'shale-varying/Data/GIS',
+                      layer = 'tl_2020_us_county_prj',
+                      verbose = TRUE) %>% 
+  as.data.frame() %>%
+  mutate(FID = row_number() - 1)
+
+county_shp %<>% dplyr::select(county_fips_code = GEOID) %>% unique()
+
+county_shp <- bind_rows(replicate(18, county_shp, simplify = FALSE))
+
+county_shp %<>% group_by(county_fips_code) %>%
+  mutate(year = 1999 + row_number()) %>%
+  ungroup()
+
+# (2) Join well counts to the key DF
+
+county_shp %<>% left_join(well_counts, by = c('county_fips_code', 'year' = 'Spud Year'))
+
+rm(well_counts)
+
+county_shp %<>% mutate_at(vars(D, H, hd_wells),
+                          funs(ifelse(is.na(.) == TRUE, 0, .)))
+
+# (3) Define county-level exposure to shale-plays over time
+# Note: We'll make the distance table into a long data-frame. We'll then join the timing data from Bartik et al. We'll extract our the first
+# year if a county overlays more than one productive shale play (e.g., Utica + Marcellus).
+
+distance_dummies %<>% gather(shale_play, presence, -county_fips_code) %>%
+  left_join(shale_timing, by = c('shale_play'))
+
+distance_dummies %<>% filter(presence == 1 & !is.na(presence) == TRUE) # Filter out only shale play counties
+
+distance_dummies %<>% filter(shale_play != 'non_active_shale') # Drops about 300 county-play connections
+
+distance_dummies %<>% mutate(first_frac_year = case_when(
+  shale_play %in% c('New Albany', 'Antrim') ~ 2010,
+  !(shale_play %in% c('New Albany', 'Antrim')) ~ first_frac_year
+)) # Give Antrim and New Albany 2010
+
+# Filter out first year of exposure by Bartik et al. if multiple shale plays are in area
+
+distance_dummies %<>% arrange(county_fips_code, first_frac_year) %>%
+  group_by(county_fips_code) %>%
+  filter(row_number() == 1) %>%
+  ungroup()
+
+# (4) Merge county-level exposure to shale plays over time
+
+county_shp %<>% left_join(distance_dummies, by = c('county_fips_code'))
+
+rm(list = setdiff(ls(), c('county_shp', 'shale_timing')))
+
+county_shp %<>% mutate(shale_county = ifelse(!is.na(shale_play) == TRUE, 1, 0),
+                       post_shale = ifelse(year >= first_frac_year & !is.na(first_frac_year) == TRUE, 1, 0))
+
+county_shp %<>% arrange(county_fips_code, year)
+
+# (5) Plot development over time by shale play
+
+for(fff in unique(shale_timing$shale_play)) {
+  
+  # Calculate # of wells by year
+  
+  temp <- county_shp %>% filter(shale_play == fff) %>%
+    group_by(year) %>%
+    summarise_at(vars(D, H, hd_wells),
+                 funs(sum(., na.rm = TRUE))) %>%
+    ungroup()
+  
+  # Grab first year of development (Bartik)
+  
+  first_year <- shale_timing %>% filter(shale_play == fff) %>% dplyr::select(first_frac_year) %>% pull()
+  
+  # Plot data and save
+  
+  temp_plot <- ggplot(data = temp,
+                      aes(x = year, y = hd_wells)) + 
+    theme_classic() + labs(x = 'Year', y = '# of horizontal/directional wells',
+                           title = 'Annual shale development by active play in the U.S.',
+                           subtitle = fff) + 
+    geom_point(color = 'dodgerblue', size = 3) + geom_line(color = 'black') + 
+    geom_vline(xintercept = first_year)
+  
+  temp_plot
+  
+  ggsave(paste0('shale-varying/Figures/Figure_X_Shale_Development_in_', fff, '_Play.jpg'))
+  
+  # Timestamp and remove files
+  
+  print(fff)
+  
+  rm(temp, temp_plot, first_year, fff)
+    
+}

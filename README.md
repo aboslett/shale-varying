@@ -8,7 +8,7 @@ At this point, my interest is in learning the underlying methods, rather than th
 
 In fact, I don't believe that it's realistic to think about the shale boom in a binary fashion. 
 
-* There is a ton of variation in the level of shale development over time, including a slow build-up in many places. It's convenient to believe that shale development went from 0 to 60 in a few seconds flat. But this was generally not the case.
+* There is a ton of variation in the level of shale development over time, including a slow build-up in many places. It's convenient to believe that shale development went from 0 to 60 in a few seconds flat. But this was generally not the case (though see counter-example below).
 * Many shale plays had substantial non-shale development prior to the boom. In these places, non-shale development decreased while shale development ramped up. The characteristics of drilling certainly changed and production grew but the underlying phenomena of oil and gas extraction had been going on before the shale boom. 
 
 For now, I will continue in this line of thinking/modeling, as the principal reason for this work is my own learning. It is also my understanding that there are variants in development of time-varying treatment effects methods that allow for treatments measured in intensity, so perhaps these issues won't be relevant in the coming months.
@@ -20,5 +20,6 @@ For now, I will continue in this line of thinking/modeling, as the principal rea
 * Exploration of data: 2-...
   * __2-explore-data.R__: Explore general characteristics of data (e.g., distributions of key variables; treatment timing assumptions)
 * Analysis of data: 3-...
-* Additional exports of data, as neeeded: 4-...
+* Additional exports of data, as needed: 4-...
 
+![0-60mph?](figures/Figure_X_Shale_Development_in_Eagle Ford_Play.jpg " ")

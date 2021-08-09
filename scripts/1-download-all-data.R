@@ -57,13 +57,13 @@ for(fff in 2000:2019) {
   
   # Import file
 
-  if(fff >= 2003 & fff <= 2005) {
+  if(fff >= 2003 & fff <= 2004) {
     
     temp <- read_excel(paste0('shale-varying/Data/SAIPE/saipe_', as.character(fff), '.xls'),
                        col_names = TRUE,
                        skip = 1)
   
-  } else if(fff >= 2006 & fff <= 2012) {
+  } else if(fff >= 2005 & fff <= 2012) {
     
     temp <- read_excel(paste0('shale-varying/Data/SAIPE/saipe_', as.character(fff), '.xls'),
                        col_names = TRUE,
@@ -131,7 +131,7 @@ for(fff in 2000:2019) {
 
 # Save to scratch
 
-temp %>% saveRDS('shale-varying/Scratch/SAIPE_2000_2019.rds')
+saipe %>% saveRDS('shale-varying/Scratch/SAIPE_2000_2019.rds')
 
 # Local Area Unemployment Statistics ----------------------------------
 # Note: Use mapping function to download data from all vintages.
@@ -579,6 +579,7 @@ for(fff in zipped_folders) {
   unzip(paste0('shale-varying/Data/SOI/', fff), exdir = 'shale-varying/Data/SOI')
   
 }
+
 # Shale play timing --------------------------
 # Note: I don't buy this timing...yet...but I am going to bring it in anyway as a starting point for defining when
 # shale development happened in a particular play. This is from Bartik et al. (2019) in the American Economic Review (Applied).
@@ -609,6 +610,151 @@ shale_timing <- data.frame(shale_play = c('Woodford-Anadarko', 'Marcellus', 'Uti
 # Save as RDS file
 
 shale_timing %>% saveRDS('shale-varying/Data/Bartik/Shale_Play_Development_Timing.rds')
+
+# DrillingInfo data ---------------------------------
+# Notes: These data are not publicly available. FracTracker provides a nice directory of state-level databases from 
+# government agencies. One could go down that route with the goal of having fully-replicable work.
+
+di_wells <- read_csv('ShaleGas/Drillinginfo/Nationwide/National_HD_Wells_10252017.csv')
+
+# Clean data
+
+names(di_wells)
+
+# Keep relevant data
+
+di_wells %<>% dplyr::select(API14, `County/Parish`,
+                            `Production Type`, `True Vertical Depth`, 
+                            `Drill Type`, `Spud Date`, 
+                            contains('Latitude'), contains('Longitude'),
+                            -contains('Bottom'))
+
+# County name is a mess (county name + (state abbreviation)). Can we use lat/long to assign wells to counties?
+
+di_wells %>% filter(is.na(`Surface Hole Latitude (WGS84)`) == TRUE) %>% nrow() / nrow(di_wells) # 0.12% of wells
+
+temp_plot <- ggplot(data = di_wells,
+                    aes(x = `Surface Hole Latitude (WGS84)`)) + 
+  theme_classic() + geom_histogram(binwidth = 1, color = 'black', fill = 'grey80')
+
+temp_plot 
+
+rm(temp_plot)
+
+temp_plot <- ggplot(data = di_wells,
+                    aes(x = `Surface Hole Longitude (WGS84)`)) + 
+  theme_classic() + geom_histogram(binwidth = 1, color = 'black', fill = 'grey80')
+
+temp_plot
+
+rm(temp_plot)
+
+# Keep if latitude and longitude are non-missing
+
+di_wells %<>% filter(!is.na(`Surface Hole Longitude (WGS84)`) == TRUE & 
+                       !is.na(`Surface Hole Latitude (WGS84)`))
+
+# What types of wells are we dealing with here?
+
+di_wells %>% group_by(`Production Type`) %>% summarise(n = n()) %>%
+  ungroup()
+
+di_wells %<>% filter(`Production Type` %in% c('OIL', 'OIL & GAS', 'GAS', 'UNKNOWN'))
+
+di_wells %>% group_by(`Drill Type`) %>% summarise(n = n()) %>% 
+  ungroup() # D + H is good.
+
+# Can't be sure that the well latitude/longitudes were measured reasonably well, but we do know that there weren't
+# weird coordinate definition issues (e.g., using negative values instead of positive for latitude, using projected coordinate
+# systems instead of geographic coordinate systems). Let's use ArcGIS to assign wells to counties. Let's convert this file
+# into a shapefile and assign each well to its overlying county. This will probably give us the same exact answer as the count-by-attribute
+# but this is arguably easier.
+
+di_wells %<>% as.data.frame()
+
+di_wells %<>% select(latitude = `Surface Hole Latitude (WGS84)`,
+                     longitude = `Surface Hole Longitude (WGS84)`,
+                     `Drill Type`,
+                     `Spud Date`) %>%
+  mutate(unique_id = row_number())
+
+# Create a spatial points object
+
+sp::SpatialPointsDataFrame(coords = select(di_wells, longitude, latitude),
+                           proj4string = CRS('+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs '), 
+                           data = di_wells) -> di_wells_sp
+
+# Reproject to albers equal area conic
+
+di_wells_sp %<>% spTransform(CRSobj = CRS("+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=37.5 +lon_0=-96 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs"))
+
+# Write as a shapefile
+
+writeOGR(obj = di_wells_sp, 
+         dsn = paste0('shale-varying/Data/GIS'), 
+         layer = 'National_HD_Wells', 
+         driver = "ESRI Shapefile",
+         overwrite_layer = TRUE)
+
+rm(di_wells_sp)
+
+# Read in distance file 
+# Notes: From 1-gather...
+
+temp_distance <- read_csv('shale-varying/Scratch/USCB_County_to_DI_HD_Wells_5Miles.csv')
+
+temp_distance %<>% dplyr::select(contains('FID'), NEAR_DIST)
+
+# Read county shapefile
+
+county_shp <- readOGR(dsn = 'shale-varying/Data/GIS',
+                      layer = 'tl_2020_us_county_prj',
+                      verbose = TRUE) %>% as.data.frame() %>%
+  mutate(FID = row_number() - 1) %>% dplyr::select(FID, county_fips_code = GEOID)
+
+# Join shapefile data to distance file
+
+di_wells %<>% mutate(FID = row_number() - 1)
+
+# Join distance file with attributes
+
+temp_distance %<>% left_join(county_shp, by = c('IN_FID' = 'FID')) %>%
+  left_join(di_wells, by = c('NEAR_FID' = 'FID'))
+
+# Filter out to only the well-to-county matches
+# Note: We only want to keep those matches where the well is within the county.
+
+temp_distance %<>% filter(NEAR_DIST == 0)
+
+n_distinct(temp_distance$NEAR_FID) == nrow(temp_distance) # Each well only appears once 
+
+# Drop wells that don't have a spud date
+
+temp_distance %>% filter(!is.na(`Spud Date`) == TRUE) %>% nrow()
+
+temp_distance %<>% filter(!is.na(`Spud Date`) == TRUE)
+
+# Keep post-2000
+
+temp_distance %<>% mutate(`Spud Date` = lubridate::mdy(`Spud Date`),
+                          `Spud Year` = lubridate::year(`Spud Date`))
+
+temp_distance %<>% filter(`Spud Year` >= 2000)
+
+# Calculate # of wells by county-year
+
+temp_distance %>% group_by(county_fips_code, `Spud Year`, `Drill Type`) %>%
+  summarise(n_n = n()) %>%
+  ungroup() %>%
+  dcast(county_fips_code + `Spud Year` ~ `Drill Type`, value.var = c('n_n')) -> well_counts
+  
+well_counts %<>% mutate_at(vars(D, H),
+                           funs(ifelse(is.na(.) == TRUE, 0, .))) %>%
+  mutate(hd_wells = D + H)
+
+# Save as RDS file 
+
+well_counts %>% saveRDS('shale-varying/Scratch/County_Well_Counts_by_Year_2000_2017.rds')
 
 # Mapping shale plays to counties -----------------------------------
 # Notes: In this part of the code, I download shapefile data from the U.S. Energy Information Administration on locations of

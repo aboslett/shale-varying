@@ -13,7 +13,12 @@ In fact, I don't believe that it's realistic to think about the shale boom in a 
 
 For now, I will continue in this line of thinking/modeling, as the principal reason for this work is my own learning. It is also my understanding that there are variants in development of time-varying treatment effects methods that allow for treatments measured in intensity, so perhaps these issues won't be relevant in the coming months.
 
-# General structure of the code.
-
-TBD.
+# General structure of code.
+* Data gathering & cleaning: 1-...
+  * __1-download-all-data.R__: Downloads all/most data used in paper from the internet
+  * __1-generate-all-spatial-data.py__: Generates all spatial connection between data-points
+* Exploration of data: 2-...
+  * __2-explore-data.R__: Explore general characteristics of data (e.g., distributions of key variables; treatment timing assumptions)
+* Analysis of data: 3-...
+* Additional exports of data, as neeeded: 4-...
 

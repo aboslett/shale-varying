@@ -37,7 +37,9 @@ for fff in ['ShalePlays_US_EIA_Sep2019', 'tl_2020_us_county']:
     max_deviation="",
     vertical="NO_VERTICAL")
 
-# Create near table
+# Create and export near table
+
+# (1) Shale play connection
 
 arcpy.GenerateNearTable_analysis(
 near_features = os.path.join(box_dir + "/shale-varying/Data/GIS/" + 'ShalePlays_US_EIA_Sep2019_prj.shp'),
@@ -50,12 +52,28 @@ closest = "ALL",
 closest_count = "",
 method = "PLANAR")
 
-# Export data table to a CSV file in the Box scratch folder
-
 arcpy.TableToTable_conversion(
 in_rows = os.path.join(box_dir + '/shale-varying/Scratch/' + 'Spatial_Data.gdb' + '/USCB_County_to_USEIA_Shale_Play'),
 out_path= box_dir + '/shale-varying/Scratch/',
 out_name= 'USCB_County_to_USEIA_Shale_Play_50Miles' + '.csv')
+
+# (2) Wells
+
+arcpy.GenerateNearTable_analysis(
+near_features = os.path.join(box_dir + "/shale-varying/Data/GIS/" + 'National_HD_Wells.shp'),
+in_features = os.path.join(box_dir + "/shale-varying/Data/GIS/" + "tl_2020_us_county_prj.shp"),
+out_table = os.path.join(box_dir + '/shale-varying/Scratch/' + 'Spatial_Data.gdb' + '/USCB_County_to_DI_HD_Wells'),
+search_radius = "5 MILES",
+location = "NO_LOCATION",
+angle = "NO_ANGLE",
+closest = "ALL",
+closest_count = "",
+method = "PLANAR")
+
+arcpy.TableToTable_conversion(
+in_rows = os.path.join(box_dir + '/shale-varying/Scratch/' + 'Spatial_Data.gdb' + '/USCB_County_to_DI_HD_Wells'),
+out_path= box_dir + '/shale-varying/Scratch/',
+out_name= 'USCB_County_to_DI_HD_Wells_5Miles' + '.csv')
 
 
 

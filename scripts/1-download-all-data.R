@@ -110,13 +110,13 @@ for(fff in 2000:2019) {
                           contains('Median'),
                           year)
   
-  temp %<>% mutate_at(vars(contains('Poverty')),
+  temp %<>% mutate_at(vars(contains('Poverty'), contains('Median')),
                       funs(as.numeric(.)))
   
   temp %<>% mutate_at(vars(contains('Poverty')),
                       funs(round(., 4)))
   
-  temp %<>% mutate_at(vars(-contains('Poverty')),
+  temp %<>% mutate_at(vars(-contains('Poverty'), -contains('Median')),
                       funs(as.character(.)))
   
   # Bind to saipe data.frame
@@ -129,7 +129,27 @@ for(fff in 2000:2019) {
   
 }
 
-# Save to scratch
+# Clean file
+
+saipe %<>% mutate_at(vars(contains('FIPS')), 
+                     funs(as.character(.)))
+
+saipe %<>% mutate_at(vars(contains('FIPS')), 
+                     funs(str_trim(.)))
+
+saipe %<>% mutate(`State FIPS` = ifelse(str_length(`State FIPS`) == 1, paste0('0', `State FIPS`), `State FIPS`),
+                  `County FIPS` = case_when(
+                    str_length(`County FIPS`) == 1 ~ paste0('00', `County FIPS`),
+                    str_length(`County FIPS`) == 2 ~ paste0('0', `County FIPS`),
+                    str_length(`County FIPS`) == 3 ~ `County FIPS`
+                  ),
+                  county_fips_code = paste0(`State FIPS`, `County FIPS`),
+                  year = as.numeric(year)) %>%
+  dplyr::select(county_fips_code, year, `Median Household Income`, contains('Poverty'))
+
+saipe %<>% arrange(county_fips_code, year)
+
+# Save as RDS file
 
 saipe %>% saveRDS('shale-varying/Scratch/SAIPE_2000_2019.rds')
 

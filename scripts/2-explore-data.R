@@ -212,3 +212,13 @@ for(fff in unique(shale_timing$shale_play)) {
   rm(temp, temp_plot, first_year, fff)
     
 }
+
+# Regressions -----------------------------------
+
+# Merge with SAIPE data
+
+saipe <- readRDS('shale-varying/Scratch/SAIPE_2000_2019.rds')
+
+county_shp %<>% left_join(saipe, by = c('county_fips_code', 'year'))
+
+

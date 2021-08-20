@@ -600,6 +600,76 @@ for(fff in zipped_folders) {
   
 }
 
+# Clean data (2011-2018)
+
+all_soi <- data.frame()
+
+for(fff in 10:18) {
+  
+  if(fff <= 16) {
+    
+    temp <- read_excel(paste0('shale-varying/Data/SOI/', fff, 'incyall.xls'),
+                       skip = 3, col_names = TRUE)
+    
+  } else {
+    
+    temp <- read_excel(paste0('shale-varying/Data/SOI/', fff, 'incyall.xlsx'),
+                       skip = 3, col_names = TRUE)
+    
+  }
+  
+  # Clean data
+  
+  temp %<>% mutate_at(vars(contains('FIPS')),
+                      funs(as.character(.))) %>%
+            mutate_at(vars(contains('County')),
+                      funs(case_when(
+                        str_length(.) == 1 ~ paste0('00', .),
+                        str_length(.) == 2 ~ paste0('0', .),
+                        str_length(.) == 3 ~ .
+                      ))) %>%
+            mutate_at(vars(contains('State')),
+                      funs(case_when(
+                        str_length(.) == 1 ~ paste0('0', .),
+                        str_length(.) == 2 ~ .
+                      )))
+  
+  temp_fips <- temp %>% dplyr::select(1, 3)
+  
+  names(temp_fips) <- c('state', 'county')
+  
+  temp$county_fips_code <- paste0(temp_fips$state, temp_fips$county)
+  
+  rm(temp_fips)
+  
+  temp %<>% mutate(year = fff + 2000)
+  
+  temp %<>% dplyr::select(county_fips_code, year, `Number of returns`, starts_with('Adjusted gross income'))
+  
+  temp %<>% mutate_at(vars(`Number of returns`, starts_with('Adjusted gross')),
+                      funs(as.numeric(.))) 
+  
+  temp %<>% filter(!is.na(`Number of returns`))
+  
+  # Bind data
+  
+  all_soi %<>% bind_rows(temp)
+  
+  rm(temp)
+  
+}
+
+# Clean the adjusted gross income data
+
+all_soi %<>% mutate(adjusted_gross_income = case_when(
+  !is.na(`Adjusted gross income (AGI) [2]`) == TRUE ~ `Adjusted gross income (AGI) [2]`,
+  !is.na(`Adjusted gross income (AGI) [3]`) == TRUE ~ `Adjusted gross income (AGI) [3]`,
+  !is.na(`Adjusted gross income (AGI) [4]`) == TRUE ~ `Adjusted gross income (AGI) [4]`,
+  !is.na(`Adjusted gross income (AGI) [5]`) == TRUE ~ `Adjusted gross income (AGI) [5]`,
+  !is.na(`Adjusted gross income (AGI) [6]`) == TRUE ~ `Adjusted gross income (AGI) [6]`
+))
+
+all_soi %<>% dplyr::select(-contains('['))
 # Shale play timing --------------------------
 # Note: I don't buy this timing...yet...but I am going to bring it in anyway as a starting point for defining when
 # shale development happened in a particular play. This is from Bartik et al. (2019) in the American Economic Review (Applied).
@@ -630,6 +700,30 @@ shale_timing <- data.frame(shale_play = c('Woodford-Anadarko', 'Marcellus', 'Uti
 # Save as RDS file
 
 shale_timing %>% saveRDS('shale-varying/Data/Bartik/Shale_Play_Development_Timing.rds')
+
+# Rural-Urban Continuum -------------------------
+
+# Download file
+
+dir.create('shale-varying/Data/ERS', showWarnings = TRUE)
+
+url <- "https://www.ers.usda.gov/webdocs/DataFiles/53251/ruralurbancodes2013.xls?v=8861"
+
+temp_xls <- tempfile(fileext = ".xls")
+
+download.file(url, destfile = temp_xls, mode = "wb")
+
+rural_urban <- read_excel(temp_xls)
+
+# Clean data
+
+rural_urban %<>% select(county_fips_code = FIPS, description = Description) %>%
+  mutate(metro = ifelse(str_detect(string = description, pattern = '^Metro') == TRUE, 1, 0))
+
+# Save data
+
+rural_urban %>% saveRDS('shale-varying/Scratch/USDA_ERS_Rural_Urban_Classification.rds')
+
 
 # DrillingInfo data ---------------------------------
 # Notes: These data are not publicly available. FracTracker provides a nice directory of state-level databases from 

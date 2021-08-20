@@ -175,6 +175,29 @@ county_shp %<>% mutate(shale_county = ifelse(!is.na(shale_play) == TRUE, 1, 0),
 
 county_shp %<>% arrange(county_fips_code, year)
 
+# (6) Merge with other explanatory data
+
+rural_urban <- readRDS('shale-varying/Scratch/USDA_ERS_Rural_Urban_Classification.rds')
+
+county_shp %<>% left_join(rural_urban, by = c('county_fips_code'))
+
+rm(rural_urban)
+
+lau <- readRDS(file = paste0('shale-varying/Data/LAUS/lau_1995_2016.rds'))
+
+county_shp %<>% left_join(lau, by = c('county_fips_code', 'year'))
+
+rm(lau)
+
+recent_pop <- readRDS('shale-varying/Scratch/SEER_Population_Data_2000_2018.rds')
+
+recent_pop %<>% mutate(non_white_pop_percentage = (black + other) / (black + other + white),
+                       total_pop = black + other + white)
+
+county_shp %<>% left_join(recent_pop, by = c('county_fips_code', 'year'))
+
+rm(recent_pop)
+
 # (5) Plot development over time by shale play
 
 for(fff in unique(shale_timing$shale_play)) {
@@ -221,4 +244,102 @@ saipe <- readRDS('shale-varying/Scratch/SAIPE_2000_2019.rds')
 
 county_shp %<>% left_join(saipe, by = c('county_fips_code', 'year'))
 
+# Add interaction term
 
+county_shp %<>% mutate(interaction_term = shale_county * post_shale)
+
+county_shp %<>% mutate(state_fips_code = str_sub(county_fips_code, end = 2)) %>%
+  group_by(state_fips_code) %>%
+  mutate(shale_state = max(shale_county)) %>%
+  ungroup()
+
+# Benchmark difference-in-difference models
+
+all_results <- data.frame() 
+
+# (1) Shale counties + standard FE
+
+temp_model <- felm(data = subset(county_shp_pnl, shale_state == 1),
+                   Median.Household.Income ~ interaction_term + log(total_pop) + non_white_pop_percentage | 
+                     county_fips_code + as.character(year) | 0 | county_fips_code) %>% tidy() %>%
+  mutate_at(vars(-contains('term')),
+            funs(round(., 3))) %>%
+  filter(term == 'interaction_term') %>%
+  mutate(model = 'Income, Shale States, State + Year FE')
+
+all_results %<>% bind_rows(temp_model)
+
+temp_model <- felm(data = subset(county_shp_pnl, shale_state == 1),
+                    Poverty.Percent.All.Ages ~ interaction_term + log(total_pop) + non_white_pop_percentage | 
+                     county_fips_code + as.character(year) | 0 | county_fips_code) %>% tidy() %>%
+  mutate_at(vars(-contains('term')),
+            funs(round(., 3))) %>%
+  filter(term == 'interaction_term') %>%
+  mutate(model = 'Poverty, Shale States, State + Year FE')
+
+all_results %<>% bind_rows(temp_model)
+
+temp_model <- felm(data = subset(county_shp_pnl, shale_state == 1),
+                   unemployment_rate ~ interaction_term + log(total_pop) + non_white_pop_percentage | 
+                     county_fips_code + as.character(year) | 0 | county_fips_code) %>% tidy() %>%
+  mutate_at(vars(-contains('term')),
+            funs(round(., 3))) %>%
+  filter(term == 'interaction_term') %>%
+  mutate(model = 'Unemployment rate, Shale States, State + Year FE')
+
+all_results %<>% bind_rows(temp_model)
+
+# (2) Same as above, by metro vs. non-metro
+# Note: Based on USDA-ERS Rural-Urban Continuum data.
+
+metro_reg <- function(df, metro_class) {
+  
+  metro_class_string <- ifelse(metro_class == 1, 'Metro', 'Non-Metro')
+  
+  temp_models <- data.frame()
+  
+  temp_model <- felm(data = subset(df, shale_state == 1 & metro == metro_class),
+                    Median.Household.Income ~ interaction_term  + log(total_pop) + non_white_pop_percentage | 
+                      county_fips_code + as.character(year) | 0 | county_fips_code) %>% tidy() %>%
+    mutate_at(vars(-contains('term')),
+              funs(round(., 3))) %>%
+    filter(term == 'interaction_term') %>%
+    mutate(model = paste0('Income, Shale States, State + Year FE, ', metro_class_string, ' Counties'))
+  
+  temp_models %<>% bind_rows(temp_model)
+  
+  temp_model <- felm(data = subset(df, shale_state == 1 & metro == metro_class),
+                     Poverty.Percent.All.Ages ~ interaction_term  + log(total_pop) + non_white_pop_percentage | 
+                       county_fips_code + as.character(year) | 0 | county_fips_code) %>% tidy() %>%
+    mutate_at(vars(-contains('term')),
+              funs(round(., 3))) %>%
+    filter(term == 'interaction_term') %>%
+    mutate(model = paste0('Poverty, Shale States, State + Year FE, ', metro_class_string, ' Counties'))
+  
+  temp_models %<>% bind_rows(temp_model)
+  
+  temp_model <- felm(data = subset(df, shale_state == 1 & metro == metro_class),
+                     unemployment_rate ~ interaction_term  + log(total_pop) + non_white_pop_percentage | 
+                       county_fips_code + as.character(year) | 0 | county_fips_code) %>% tidy() %>%
+    mutate_at(vars(-contains('term')),
+              funs(round(., 3))) %>%
+    filter(term == 'interaction_term') %>%
+    mutate(model = paste0('Unemployment rate, Shale States, State + Year FE, ', metro_class_string, ' Counties'))
+  
+   temp_models %<>% bind_rows(temp_model)
+   
+  return(temp_models)
+  
+}
+
+temp_model <- metro_reg(county_shp_pnl, 1)
+
+all_results %<>% bind_rows(temp_model)
+
+temp_model <- metro_reg(county_shp_pnl, 0)
+
+all_results %<>% bind_rows(temp_model)
+
+rm(temp_model, metro_reg)
+
+# 

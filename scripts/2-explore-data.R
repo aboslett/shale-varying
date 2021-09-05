@@ -244,6 +244,14 @@ saipe <- readRDS('shale-varying/Scratch/SAIPE_2000_2019.rds')
 
 county_shp %<>% left_join(saipe, by = c('county_fips_code', 'year'))
 
+# Merge with Zillow SFR data
+
+zillow_sfr <- readRDS('shale-varying/Scratch/Zillow_ZHVI_SFR_1996_2021.rds')
+
+county_shp %<>% left_join(zillow_sfr, by = c('county_fips_code', 'year'))
+
+rm(zillow_sfr)
+
 # Add interaction term
 
 county_shp %<>% mutate(interaction_term = shale_county * post_shale)
@@ -253,14 +261,18 @@ county_shp %<>% mutate(state_fips_code = str_sub(county_fips_code, end = 2)) %>%
   mutate(shale_state = max(shale_county)) %>%
   ungroup()
 
+# Rename variables
+
+names(county_shp) %<>% str_replace_all(pattern = ' ', replacement = '_')
+
 # Benchmark difference-in-difference models
 
 all_results <- data.frame() 
 
 # (1) Shale counties + standard FE
 
-temp_model <- felm(data = subset(county_shp_pnl, shale_state == 1),
-                   Median.Household.Income ~ interaction_term + log(total_pop) + non_white_pop_percentage | 
+temp_model <- felm(data = subset(county_shp, shale_state == 1),
+                   Median_Household_Income ~ interaction_term + log(total_pop) + non_white_pop_percentage | 
                      county_fips_code + as.character(year) | 0 | county_fips_code) %>% tidy() %>%
   mutate_at(vars(-contains('term')),
             funs(round(., 3))) %>%
@@ -269,8 +281,8 @@ temp_model <- felm(data = subset(county_shp_pnl, shale_state == 1),
 
 all_results %<>% bind_rows(temp_model)
 
-temp_model <- felm(data = subset(county_shp_pnl, shale_state == 1),
-                    Poverty.Percent.All.Ages ~ interaction_term + log(total_pop) + non_white_pop_percentage | 
+temp_model <- felm(data = subset(county_shp, shale_state == 1),
+                    Poverty_Percent_All_Ages ~ interaction_term + log(total_pop) + non_white_pop_percentage | 
                      county_fips_code + as.character(year) | 0 | county_fips_code) %>% tidy() %>%
   mutate_at(vars(-contains('term')),
             funs(round(., 3))) %>%
@@ -279,13 +291,23 @@ temp_model <- felm(data = subset(county_shp_pnl, shale_state == 1),
 
 all_results %<>% bind_rows(temp_model)
 
-temp_model <- felm(data = subset(county_shp_pnl, shale_state == 1),
+temp_model <- felm(data = subset(county_shp, shale_state == 1),
                    unemployment_rate ~ interaction_term + log(total_pop) + non_white_pop_percentage | 
                      county_fips_code + as.character(year) | 0 | county_fips_code) %>% tidy() %>%
   mutate_at(vars(-contains('term')),
             funs(round(., 3))) %>%
   filter(term == 'interaction_term') %>%
   mutate(model = 'Unemployment rate, Shale States, State + Year FE')
+
+all_results %<>% bind_rows(temp_model)
+
+temp_model <- felm(data = subset(county_shp, shale_state == 1),
+                   zhvi_sfr ~ interaction_term + log(total_pop) + non_white_pop_percentage | 
+                     county_fips_code + as.character(year) | 0 | county_fips_code) %>% tidy() %>%
+  mutate_at(vars(-contains('term')),
+            funs(round(., 3))) %>%
+  filter(term == 'interaction_term') %>%
+  mutate(model = 'Zillow SFR, Shale States, State + Year FE')
 
 all_results %<>% bind_rows(temp_model)
 
@@ -299,7 +321,7 @@ metro_reg <- function(df, metro_class) {
   temp_models <- data.frame()
   
   temp_model <- felm(data = subset(df, shale_state == 1 & metro == metro_class),
-                    Median.Household.Income ~ interaction_term  + log(total_pop) + non_white_pop_percentage | 
+                    Median_Household_Income ~ interaction_term  + log(total_pop) + non_white_pop_percentage | 
                       county_fips_code + as.character(year) | 0 | county_fips_code) %>% tidy() %>%
     mutate_at(vars(-contains('term')),
               funs(round(., 3))) %>%
@@ -309,7 +331,7 @@ metro_reg <- function(df, metro_class) {
   temp_models %<>% bind_rows(temp_model)
   
   temp_model <- felm(data = subset(df, shale_state == 1 & metro == metro_class),
-                     Poverty.Percent.All.Ages ~ interaction_term  + log(total_pop) + non_white_pop_percentage | 
+                     Poverty_Percent_All_Ages ~ interaction_term  + log(total_pop) + non_white_pop_percentage | 
                        county_fips_code + as.character(year) | 0 | county_fips_code) %>% tidy() %>%
     mutate_at(vars(-contains('term')),
               funs(round(., 3))) %>%
@@ -328,18 +350,202 @@ metro_reg <- function(df, metro_class) {
   
    temp_models %<>% bind_rows(temp_model)
    
+   temp_model <- felm(data = subset(df, shale_state == 1 & metro == metro_class),
+                      zhvi_sfr ~ interaction_term  + log(total_pop) + non_white_pop_percentage | 
+                        county_fips_code + as.character(year) | 0 | county_fips_code) %>% tidy() %>%
+     mutate_at(vars(-contains('term')),
+               funs(round(., 3))) %>%
+     filter(term == 'interaction_term') %>%
+     mutate(model = paste0('Zillow SFR, Shale States, State + Year FE, ', metro_class_string, ' Counties'))
+   
+   temp_models %<>% bind_rows(temp_model)
+   
   return(temp_models)
   
 }
 
-temp_model <- metro_reg(county_shp_pnl, 1)
+temp_model <- metro_reg(county_shp, 1)
 
 all_results %<>% bind_rows(temp_model)
 
-temp_model <- metro_reg(county_shp_pnl, 0)
+temp_model <- metro_reg(county_shp, 0)
 
 all_results %<>% bind_rows(temp_model)
 
 rm(temp_model, metro_reg)
 
-# 
+# Bacon Decomposition -------------------------------
+
+# See if results are the same
+# Note: Focus on non-metros for now.
+
+# Bacon-Decomposition
+
+df_bacon <- bacon(Median_Household_Income ~ interaction_term,
+                  data = subset(county_shp, shale_state == 1 & metro == 0),
+                  id_var = "county_fips_code",
+                  time_var = "year")
+
+coef_bacon <- sum(df_bacon$estimate * df_bacon$weight)
+print(paste("Weighted sum of decomposition =", round(coef_bacon, 4)))
+
+# Two-way fixed effects
+
+fit_tw <- lm(Median_Household_Income ~ interaction_term + factor(county_fips_code) + factor(year),
+             data = subset(county_shp, shale_state == 1 & metro == 0))
+
+print(paste("Two-way FE estimate =", round(fit_tw$coefficients[2], 4)))
+
+# Plot weights and estimates
+
+ggplot(df_bacon) +
+  aes(x = weight, y = estimate, shape = factor(type)) +
+  labs(x = "Weight", y = "Estimate", shape = "Type") +
+  geom_point() + theme_classic()
+
+# Note: Much of the variation comes from 2008 and 2010 compared to never-treated. This makes sense, given the timing of
+# drilling. Both of these estimates are negative, despite overall positive relationship between drilling and income.
+
+# Bacon-Decomposition (ZHVI SFR) -------------------------------------------
+
+# Impute Zillow SFR
+
+county_shp %<>% mutate(zhvi_sfr_imputed = zhvi_sfr) %>%
+  arrange(county_fips_code, year) %>%
+  group_by(county_fips_code) %>%
+  mutate(zhvi_sfr_imputed = na.approx(zhvi_sfr_imputed, na.rm = FALSE)) %>%
+  ungroup() %>%
+  mutate(zhvi_sfr_missing = ifelse(is.na(zhvi_sfr) == TRUE, 1, 0)) %>%
+  group_by(county_fips_code) %>%
+  mutate(zhvi_sfr_ever_missing = max(zhvi_sfr_missing))
+  
+df_bacon <- bacon(zhvi_sfr_imputed ~ interaction_term,
+                  data = subset(county_shp, shale_state == 1 & metro == 0 & zhvi_sfr_ever_missing == 0),
+                  id_var = "county_fips_code",
+                  time_var = "year")
+
+coef_bacon <- sum(df_bacon$estimate * df_bacon$weight)
+print(paste("Weighted sum of decomposition =", round(coef_bacon, 4)))
+
+# Plot weights and estimates
+
+ggplot(df_bacon) +
+  aes(x = weight, y = estimate, shape = factor(type)) +
+  labs(x = "Weight", y = "Estimate", shape = "Type") +
+  geom_point() + theme_classic()
+
+# Use the Callaway & Sant'Anna approach 
+# Notes: Will have to set up to make work our data frame work with the function from the did package.
+# Good resources (and source of underlying code): https://causalinf.substack.com/p/callaway-and-santanna-dd-estimator
+
+# Setup
+
+county_shp %<>% mutate(treatment_year = ifelse(interaction_term == 1, year, NA_real_)) %>%
+  group_by(county_fips_code) %>%
+  mutate(treatment_year = min(treatment_year, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(treatment_year = ifelse(is.na(treatment_year) == TRUE | is.infinite(treatment_year) == TRUE, 0, treatment_year))
+
+county_shp %<>% mutate(no_shale = ifelse(shale_county == 0, 1, 0))
+
+county_shp %<>% mutate(county_fips_code_num = as.numeric(county_fips_code))
+
+# Run the model (Median Household Income)
+
+atts <- att_gt(yname = "Median_Household_Income", # LHS variable
+               tname = "year", # time variable
+               idname = "county_fips_code_num", # id variable
+               gname = "treatment_year", # first treatment period variable
+               data = county_shp, # data
+               xformla = NULL, # no covariates
+               est_method = "dr", # "dr" is doubly robust. "ipw" is inverse probability weighting. "reg" is regression
+               control_group = "no_shale", # set the comparison group which is either "nevertreated" or "notyettreated" 
+               bstrap = TRUE, # if TRUE compute bootstrapped SE
+               biters = 1000, # number of bootstrap iterations
+               print_details = FALSE, # if TRUE, print detailed results
+               clustervars = "county_fips_code_num", # cluster level
+               panel = TRUE)
+
+# Aggregate ATT
+
+agg_effects <- aggte(atts, type = "group")
+
+summary(agg_effects)
+
+# Group-time ATTs
+
+summary(atts)
+
+# Plot group-time ATTs
+
+ggdid(atts)
+
+# Event-study
+agg_effects_es <- aggte(atts, type = "dynamic")
+summary(agg_effects_es)
+
+# Plot event-study coefficients
+
+ggdid(agg_effects_es) + 
+  theme(legend.title = element_blank()) + 
+  geom_hline(color = 'grey70', yintercept = 0) + 
+  theme_classic() + 
+  labs(x = 'Years before/after treatment', y = 'Change in median household income',
+       title = 'Average effect of shale development on median household income',
+       subtitle = 'Time-varying effects by length of exposure')  -> income_plot
+
+income_plot
+
+ggsave('shale-varying/Figures/Figure_X_Median_Household_Income_by_Length_of_Exposure')
+
+
+# Notes: Not perfect pre-trends but not bad either. Very interesting.
+
+# Run the model (Unemployment Rate)
+
+atts <- att_gt(yname = "unemployment_rate", # LHS variable
+               tname = "year", # time variable
+               idname = "county_fips_code_num", # id variable
+               gname = "treatment_year", # first treatment period variable
+               data = county_shp, # data
+               xformla = NULL, # no covariates
+               est_method = "dr", # "dr" is doubly robust. "ipw" is inverse probability weighting. "reg" is regression
+               control_group = "no_shale", # set the comparison group which is either "nevertreated" or "notyettreated" 
+               bstrap = TRUE, # if TRUE compute bootstrapped SE
+               biters = 1000, # number of bootstrap iterations
+               print_details = FALSE, # if TRUE, print detailed results
+               clustervars = "county_fips_code_num", # cluster level
+               panel = TRUE)
+
+# Aggregate ATT
+
+agg_effects <- aggte(atts, type = "group")
+
+summary(agg_effects)
+
+# Group-time ATTs
+
+summary(atts)
+
+# Plot group-time ATTs
+
+ggdid(atts)
+
+# Event-study
+agg_effects_es <- aggte(atts, type = "dynamic")
+summary(agg_effects_es)
+
+# Plot event-study coefficients
+
+ggdid(agg_effects_es) + 
+  theme(legend.title = element_blank()) + 
+  geom_hline(color = 'grey70', yintercept = 0) + 
+  theme_classic() + 
+  labs(x = 'Years before/after treatment', y = 'Change in unemployment rate (%)',
+       title = 'Average effect of shale development on the unemployment rate',
+       subtitle = 'Time-varying effects by length of exposure')  -> unemployment_plot
+
+unemployment_plot
+
+ggsave('shale-varying/Figures/Figure_X_Unemployment_Rate_by_Length_of_Exposure.jpg')
+

@@ -7,6 +7,68 @@ rm(list = ls())
 
 # Goal: Import some data for the analyses. 
 
+# Zillow Data -------------------------
+# Note: Typical prices for a single-family residential property at the county-level. 
+
+# Download data and save it in directory
+
+zillow_sfr <- read_csv(file = url('https://files.zillowstatic.com/research/public_csvs/zhvi/County_zhvi_uc_sfr_tier_0.33_0.67_sm_sa_month.csv?t=1630355343'))
+
+dir.create('shale-varying/Data/Zillow')
+
+zillow_sfr %>% write_excel_csv('shale-varying/Data/Zillow/Zillow_ZHVI_SFR_1996_2021.csv')
+
+# Clean data
+
+zillow_sfr %<>% mutate(county_fips_code = paste0(StateCodeFIPS, MunicipalCodeFIPS)) %>%
+  dplyr::select(county_fips_code, contains('19'), contains('20'))
+
+# Gather to long
+
+zillow_sfr %<>% gather(time, zhvi_sfr, -county_fips_code) %>%
+  mutate(time = lubridate::ymd(time),
+         year = lubridate::year(time),
+         month = lubridate::month(time)) %>%
+  dplyr::select(-time) %>%
+  arrange(county_fips_code, year, month)
+
+# Summarize by year
+# Note: Inappropriate given variation in timing of sales over year.
+
+zillow_sfr %<>% group_by(county_fips_code, year) %>%
+  summarise(zhvi_sfr = mean(zhvi_sfr, na.rm = TRUE)) %>%
+  ungroup()
+
+# Save as RDS file
+
+zillow_sfr %>% saveRDS('shale-varying/Scratch/Zillow_ZHVI_SFR_1996_2021.rds')
+
+# OASDI Data --------------------------------
+# Note: These data are for social security benefits spending.
+
+# Download data
+
+dir.create('shale-varying/Data/OASDI')
+
+# 2004-2017
+
+for(fff in c(as.character(seq(from = 4, to = 17, by = 1)))) {
+
+  fff <- ifelse(str_length(fff) == 1, paste0("0", fff), fff)
+
+  url <- paste0('https://www.ssa.gov/policy/docs/statcomps/oasdi_sc/20', fff, '/oasdi_sc', fff, '.xlsx')
+
+  download.file(url = url,
+                destfile = paste0('shale-varying/Data/OASDI/OASDI_Data_', fff, '.xlsx'),
+                mode = "wb")
+
+  rm(fff, url)
+
+}
+
+# 2000-2003
+# Note: Download by state from HTML file (second on website).
+
 # SAIPE Data --------------------------------
 # Note: Small Area Income and Poverty Estimates (SAIPE) Program. Set up loop to download and save
 # year-specific Excel files of Saipe data.

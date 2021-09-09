@@ -549,3 +549,13 @@ unemployment_plot
 
 ggsave('shale-varying/Figures/Figure_X_Unemployment_Rate_by_Length_of_Exposure.jpg')
 
+# Explore use of Generalized Synthetic Control --------------------------
+# Note: See https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2584200. Still figuring out this method but it's essentially
+# a multi-treatment observation-based view of synthetic control.
+
+system.time(
+  out <- gsynth(Median_Household_Income ~ interaction_term + log(total_pop) + non_white_pop_percentage, 
+                data = subset(county_shp, !is.na(Median_Household_Income) & !is.na(total_pop)), 
+                index = c("county_fips_code", "year"), force = "two-way", CV = TRUE, r = c(0, 5), se = TRUE, inference = "parametric", nboots = 1000, parallel = FALSE)
+)
+

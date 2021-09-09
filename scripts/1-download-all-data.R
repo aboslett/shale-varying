@@ -268,7 +268,7 @@ for(fff in 0:18) {
 
 # Save as DTA and RDS files
 
-lau %>% saveRDS(file = paste0('shale-varying/Data/LAUS/lau_1995_2016.rds'))
+lau %>% saveRDS(file = paste0('shale-varying/Scratch/lau_1995_2016.rds'))
 
 # QCEW ----------------------------------
 
@@ -324,7 +324,7 @@ for(fff in 0:18) {
   
   # Keep only variables of interest
   
-  temp %<>% dplyr::select(county_fipes_code = 1, Year, NAICS, Industry, `Annual Average Employment`, `Annual Total Wages`, 
+  temp %<>% dplyr::select(county_fips_code = 1, Year, NAICS, Industry, `Annual Average Employment`, `Annual Total Wages`, 
                           `Annual Average Establishment Count`, `Annual Average Pay`)
   
   # Rename data frame columns
@@ -342,6 +342,29 @@ for(fff in 0:18) {
   rm(temp, fff)
   
 }
+
+# Save main data file in data folder
+
+qcew %>% saveRDS('shale-varying/Data/QCEW/QCEW_County_Data_2000_2018.rds')
+
+# Keep all, natural resources + mining, manufacturing, construciton, and services-providing
+
+qcew %<>% filter(naics %in% c(10, 1011, 1012, 1013, 102)) %>%
+  mutate(industry = case_when(
+    naics == 10 ~ "all",
+    naics == 1011 ~ "natural_resources",
+    naics == 1012 ~ 'construction',
+    naics == 1013 ~ 'manufacturing', 
+    naics == 102 ~ 'service_providing'
+  ))
+
+# Make data file wide
+# Note: County FIPS Code & Year key
+
+qcew %<>% setDT() %>%
+  dcast(county_fips_code + year ~ industry, 
+        value.var = c('annual_average_employment', 'annual_average_pay', 'annual_average_establishment_count')) %>%
+  mutate(year = as.numeric(year))
 
 # Save as RDS file (county data)
 

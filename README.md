@@ -17,10 +17,11 @@ For now, I will continue in this line of thinking/modeling, as the principal rea
 * Data gathering & cleaning: 1-...
   * __1-download-all-data.R__: Downloads all/most data used in paper from the internet
   * __1-generate-all-spatial-data.py__: Generates all spatial connection between data-points
+  * __2-create-analysis-database__: Merges all input data into a single analysis database
 * Exploration of data: 2-...
-  * __2-explore-data.R__: Explore general characteristics of data (e.g., distributions of key variables; treatment timing assumptions; simple regressions)
+  * __3-explore-data.R__: Explore general characteristics of data (e.g., distributions of key variables; treatment timing assumptions; simple regressions)
 * Analysis of data: 3-...
-  * __3-analyze-data.R__: Analyze models based on pre-determined plan. Output results to CSV files for cleaning in Excel.
+  * __4-analyze-data.R__: Analyze models based on pre-determined plan. Output results to CSV files for cleaning in Excel.
 * Additional exports of data, as needed: 4-...
 
 ![0-60mph?](https://github.com/aboslett/shale-varying/blob/main/figures/Figure_X_Shale_Development_in_Eagle%20Ford_Play.jpg)

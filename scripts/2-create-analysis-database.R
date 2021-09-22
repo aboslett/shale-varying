@@ -86,8 +86,8 @@ county_shp %<>% arrange(county_fips_code, year)
 
 # Year-County data
 
-for(fff in c('lau_1995_2016', 'SEER_Population_Data_2000_2018', 'SAIPE_2000_2019',
-             'Zillow_ZHVI_SFR_1996_2021', 'QCEW_County_Data_2000_2018')) {
+for(fff in c('lau_1995_2016', 'SEER_Population_Data_2000_2018', 'SAIPE_2000_2019', 'LAPI_2000_2019',
+             'Zillow_ZHVI_SFR_1996_2021', 'QCEW_County_Data_2000_2018', 'OASDI_Data_2004_2017')) {
   
   temp <- readRDS(paste0('shale-varying/Scratch/', fff, '.rds'))
   
@@ -126,6 +126,40 @@ county_shp %<>% mutate(non_white_pop_percentage = (black + other) / (black + oth
 # Rename variables
 
 names(county_shp) %<>% str_replace_all(pattern = ' ', replacement = '_')
+
+# Add ZHVI (SFR) as logged variable
+
+county_shp %<>% mutate(zhvi_sfr_log = log(zhvi_sfr))
+
+# Make disability_income a numeric variable and created interpolated/logged versions of them
+
+county_shp$disability_income %<>% as.numeric()
+
+county_shp %<>% arrange(county_fips_code, year) %>%
+  group_by(county_fips_code) %>%
+  mutate(disability_income_imputed = na.approx(disability_income, na.rm = FALSE)) %>%
+  ungroup() %>%
+  mutate(disability_income_imputed_log = log(disability_income_imputed))
+
+# Add border-county indicator --------------------------
+
+county_adjacency <- readRDS('shale-varying/Scratch/County_Adjacency_Neighbor_Exposure_to_Shale.rds')
+
+county_shp %<>% left_join(county_adjacency, by = c('county_fips_code'))
+
+county_shp %<>% mutate(shale_border_county = ifelse(shale_county == 0 & any_shale_neighbor == 1, 1, 0))
+
+# Drop Puerto Rico and other non-states -----------------------
+
+county_shp %<>% filter(as.numeric(state_fips_code) <= 56)
+
+# Define employment in other industries outcomes -------------------------------------
+
+# Generate employment shares in manufacturing, mining, etc.,
+
+county_shp %<>% mutate_at(vars(annual_average_employment_construction, annual_average_employment_manufacturing, annual_average_employment_natural_resources,
+                               annual_average_employment_service_providing),
+                          funs(percent = . / annual_average_employment_all))
 
 # Save as analysis database --------------------------
 

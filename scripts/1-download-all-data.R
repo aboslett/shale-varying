@@ -69,6 +69,151 @@ for(fff in c(as.character(seq(from = 4, to = 17, by = 1)))) {
 # 2000-2003
 # Note: Download by state from HTML file (second on website).
 
+# Clean data (2004-2017)
+# Notes: State-by-state data saved by sheet. Gosh. Format changes from abbreviation to name in 2008.
+
+oasdi_data <- data.frame()
+
+for(year in c(as.character(seq(from = 4, to = 17, by = 1)))) {
+  
+  # Start time
+  
+  print(year)
+
+  # Get year in right format
+  
+  year <- ifelse(str_length(year) == 1, paste0("0", year), year)
+  
+  # Get all sheets with "Table 5" in title
+  
+  temp_sheets <- excel_sheets(paste0('shale-varying/Data/OASDI/OASDI_Data_', year, '.xlsx')) %>% as.data.frame()
+  
+  names(temp_sheets) <- c('sheet_name') 
+  
+  temp_sheets %<>% filter(str_detect(sheet_name, pattern = '5') == TRUE) %>%
+    pull()
+
+  # Loop import
+  
+  for(sheet in temp_sheets) {
+    
+    # Download and clean data
+    
+    temp <- read_excel(paste0('shale-varying/Data/OASDI/OASDI_Data_', year, '.xlsx'),
+                       sheet = sheet, skip = 3)
+  
+    temp %<>% mutate(state_indicator = sheet,
+                     year = as.numeric(year) + 2000)
+        
+    temp %<>% dplyr::select(1, contains('ANSI'), contains('FIPS'), 
+                            contains('Disabled'), 
+                            contains('year'), 
+                            contains('state_indicator'))
+    
+    temp %<>% mutate_at(vars(contains('Disabled')),
+                        funs(as.character(.)))
+        
+    # Bind data to data frame
+        
+    oasdi_data %<>% bind_rows(temp)
+  
+  }
+  
+  # Print state for time-keeping
+  
+  print(year)
+  
+}
+
+# Residual cleaning
+
+oasdi_data %<>% mutate(state = str_trim(str_extract_all(string = state_indicator, pattern = '(?<=(\\-)).*$')))
+
+oasdi_data %<>% filter(!is.na(`Disabled workers`))
+
+names(oasdi_data)[1] <- 'county_name'
+
+oasdi_data %<>% filter(!is.na(county_name))
+
+# Make state name in file based on abbreviation
+
+rm(state)
+
+state_abbreviations <- oasdi_data %>% dplyr::select(state) %>%
+  filter(str_length(state) >= 2) %>% unique() %>% pull()
+
+state_names <- state.name[match(state_abbreviations, state.abb)]
+
+state_key <- data.frame(state_abb = state_abbreviations,
+                        state_name = state_names)
+
+rm(state_abbreviations, state_names)
+
+oasdi_data %<>% left_join(state_key, c('state' = 'state_abb'))
+
+oasdi_data %<>% mutate(state = ifelse(!is.na(state_name) == TRUE, state_name, state))
+
+oasdi_data %<>% dplyr::select(-state_name, -state_indicator)
+
+# Add state abbreviation
+# Notes: Could have cut out a step above, but this works fine, too.
+
+oasdi_data %<>% left_join(state_key, by = c('state' = 'state_name'))
+
+# Get county FIPS code
+
+county_fips_codes <- county.fips
+
+county_fips_codes$polyname %<>% str_replace_all(pattern = '(?<=(\\:)).*$', replacement = '')
+county_fips_codes$polyname %<>% str_replace_all(pattern = '\\:', replacement = '')
+
+county_fips_codes %<>% unique()
+
+# Create join key, similar to county_fips_codes key
+
+oasdi_data %<>% mutate(join_key = paste0(str_to_lower(state), ',', str_to_lower(county_name)))
+
+# Drop all spaces
+
+oasdi_data$join_key %<>% str_replace_all(pattern = ' ', replacement = '') %>%
+  str_replace_all(pattern = '[:punct:]', replacement = '')
+county_fips_codes$polyname %<>% str_replace_all(pattern = ' ', replacement = '') %>%
+  str_replace_all(pattern = '[:punct:]', replacement = '')
+
+# Execute join
+
+oasdi_data %<>% left_join(county_fips_codes, by = c('join_key' = 'polyname'))
+
+# Drop data from non-states
+
+oasdi_data %<>% filter(!state %in% c('Puerto Rico', 'U.S. Virgin Islands', 'PR', 'VI'))
+
+# Residual cleaning
+
+oasdi_data %<>% mutate(fips = as.character(fips),
+                       fips = ifelse(str_length(fips) == 4, paste0('0', fips), fips))
+
+# Notes: Remaining missing data are from Hawaii and Alaska, neither of which show up in our 
+# analysis models (since there is no current shale development in either state). They are also from
+# Virginia cities.
+
+# Strip data
+
+oasdi_data %<>% dplyr::select(county_fips_code = fips, year, disability_income = `Disabled workers`)
+
+# Make data unique
+
+oasdi_data %<>% arrange(county_fips_code, year) %>%
+  group_by(county_fips_code, year) %>%
+  filter(row_number() == 1) %>%
+  ungroup()
+
+# Save data as RDS file 
+
+oasdi_data %>% saveRDS('shale-varying/Scratch/OASDI_Data_2004_2017.rds')
+
+# Notes: Still need to get 2000-2003 data.
+
 # SAIPE Data --------------------------------
 # Note: Small Area Income and Poverty Estimates (SAIPE) Program. Set up loop to download and save
 # year-specific Excel files of Saipe data.
@@ -215,6 +360,42 @@ saipe %<>% arrange(county_fips_code, year)
 
 saipe %>% saveRDS('shale-varying/Scratch/SAIPE_2000_2019.rds')
 
+# Local Area Personal Income (BEA LAPI) ---------------------------------------
+
+# Create directory
+
+dir.create('shale-varying/Data/LAPI', showWarnings = FALSE)
+
+# Download data
+# Notes: The programmatic download of the zipped folders wasn't working. I manually (sigh) downloaded
+# the data from this link: https://apps.bea.gov/regional/downloadzip.cfm.
+# See Personal Income (State and Local): CAINC 1: Annual Personal Income by County.
+
+unzip(zipfile = 'shale-varying/Data/LAPI/CAINC1.zip', 
+      exdir = 'shale-varying/Data/LAPI')
+
+# Import data
+
+lapi <- read_csv('shale-varying/Data/LAPI/CAINC1__ALL_AREAS_1969_2019.csv')
+
+# Clean data
+
+lapi %<>% dplyr::select(county_fips_code = GeoFIPS, Description, 
+                        9:59)
+
+lapi %<>% filter(Description == 'Per capita personal income (dollars) 2/')
+
+lapi %<>% dplyr::select(-Description) %>%
+  gather(year, personal_income_per_capita, -county_fips_code)
+
+lapi %<>% filter(year >= 2000)
+
+lapi %<>% mutate_at(vars(year, personal_income_per_capita), funs(as.numeric(.)))
+
+# Save as RDS file
+
+lapi %>% saveRDS('shale-varying/Scratch/LAPI_2000_2019.rds')
+
 # Local Area Unemployment Statistics ----------------------------------
 # Note: Use mapping function to download data from all vintages.
 
@@ -281,8 +462,6 @@ dir.create('shale-varying/Data/QCEW')
 for(fff in 2000:2018) {
   
   # Download file
-  
-  temp <- tempfile()
   
   download.file(paste0('https://data.bls.gov/cew/data/files/', as.character(fff), 
                        '/xls/', as.character(fff), '_all_county_high_level.zip'),
@@ -1081,3 +1260,56 @@ temp_distance %<>% mutate_at(vars(Antrim:`Woodford-Arkoma`),
 
 temp_distance %>% saveRDS('shale-varying/Scratch/County_to_Shale_Distance_File_50mi.rds')
 distance_dummies %>% saveRDS('shale-varying/Scratch/County_to_Shale_Distance_File_Dummy.rds')
+
+# County adjacency data --------------------------
+# Notes: I could get this myself but will use the NBER website.
+
+county_adjacency <- fread("https://www2.census.gov/geo/docs/reference/county_adjacency.txt")
+
+# Save data to folder
+
+dir.create('shale-varying/Data/NBER')
+
+county_adjacency %>% saveRDS('shale-varying/Data/NBER/County_Adjacency_Data.rds')
+
+# Clean data
+
+county_adjacency %<>% dplyr::select(county_fips_code = V2, county_fips_code_neighbor = V4) # Keep FIPS code variables
+
+county_adjacency %<>% mutate(county_fips_code = na.locf(county_fips_code, na.rm = FALSE))
+
+county_adjacency %<>% filter(county_fips_code != county_fips_code_neighbor)
+
+county_adjacency %<>% mutate_at(vars(contains('fips')),
+                                funs(as.character(.))) %>%
+  mutate_at(vars(contains('fips')),
+            funs(ifelse(str_length(.) == 4, paste0('0', .), .)))
+
+# Obtain shale coverage by county
+
+distance_dummies <- readRDS('shale-varying/Scratch/County_to_Shale_Distance_File_Dummy.rds')
+
+county_adjacency %<>% left_join(distance_dummies, by = c('county_fips_code_neighbor' = 'county_fips_code'))
+
+county_adjacency %<>% mutate_at(vars(Antrim:`Woodford-Arkoma`),
+                                funs(ifelse(is.na(.) == TRUE, 0, .)))
+
+county_adjacency$any_shale <- county_adjacency %>% dplyr::select(Antrim:`Woodford-Arkoma`,
+                                                                 -contains('non_active')) %>%
+  rowSums()
+
+county_adjacency %<>% dplyr::select(county_fips_code, any_shale_neighbor = any_shale)
+
+county_adjacency %<>% mutate(any_shale_neighbor = ifelse(any_shale_neighbor > 0, 1, 0))
+
+# Get maximum of shale exposure for each county
+
+county_adjacency %<>% group_by(county_fips_code) %>%
+  summarise_at(vars(any_shale_neighbor),
+               funs(max(., na.rm = TRUE))) %>%
+  ungroup()
+
+
+# Save file as RDS file in Scratch folder
+
+county_adjacency %>% saveRDS('shale-varying/Scratch/County_Adjacency_Neighbor_Exposure_to_Shale.rds')

@@ -44,6 +44,9 @@ library(gifski)
 library(lfe)
 library(bacondecomp)
 library(did)
+library(gsynth)
+library(ggExtra)
+library(data.table)
 
 # One directories of interest here:
 # (1) My personal directory, which connects my Box folder on my external hard-drive.

@@ -28,6 +28,8 @@ county_shp <- readRDS('shale-varying/Scratch/Analysis_Database.rds')
 
 # Show trends in development over time by state -------------------------
 
+# By shale play
+
 for(fff in unique(county_shp$shale_play)) {
   
   # Calculate # of wells by year
@@ -63,6 +65,36 @@ for(fff in unique(county_shp$shale_play)) {
   rm(temp, temp_plot, first_year, fff)
   
 }
+
+# Sample of major shale plays
+
+temp <- county_shp %>% filter(shale_play %in% c('Marcellus', 'Barnett', 'Bakken', 'Eagle Ford', 'Fayetteville')) %>%
+  group_by(shale_play, year) %>%
+  summarise_at(vars(D, H, hd_wells),
+               funs(sum(., na.rm = TRUE))) %>%
+  ungroup()
+
+first_year <- county_shp %>% dplyr::select(shale_play, first_frac_year) %>% unique() %>%
+  filter(shale_play %in% temp$shale_play) %>% mutate(indicator = 1)
+
+temp_first <- temp %>% left_join(first_year, by = c('shale_play', 'year' = 'first_frac_year')) %>%
+  filter(!is.na(indicator))
+
+temp_plot <- ggplot() + 
+  theme_classic() + labs(x = 'Year', y = '# of horizontal/directional wells', title = 'Annual shale development in the U.S.',
+                         subtitle = 'A sample of major shale plays, 2000-2018') + 
+  geom_line(data = temp,
+            aes(x = year, y = hd_wells, colour = shale_play)) + 
+  geom_point(data = temp,
+             aes(x = year, y = hd_wells, colour = shale_play)) + 
+  geom_point(data = temp_first, aes(x = year, y = hd_wells, colour = shale_play),
+             size = 4, shape = 19) + 
+  theme(legend.title = element_blank()) + theme(legend.position = c(0.1, 0.8)) + 
+  scale_color_manual(values = c(c('#543005', '#bf812d', '#c7eae5', '#35978f', '#003c30')))
+
+temp_plot
+
+ggsave('shale-varying/Figures/Figure_X_Shale_Development_by_Play.jpg')
 
 # Summary statistics -----------------------------
 # Notes: Outcome & control variables, by pre vs. post-shale boom and shale presence indicator, 
@@ -111,10 +143,12 @@ county_shp %<>% mutate(no_shale = ifelse(shale_county == 0, 1, 0))
 county_shp %<>% mutate(county_fips_code_num = as.numeric(county_fips_code))
 
 # Figure 1: Dynamics of income & shale development ---------------------------
+# Notes: Per Paredes et al. (2015), the BEA LAPI includes wage and non-wage income, the latter of which
+# is relevant to natural gas and oil leasing.
 
 # Run the model (Median Household Income)
 
-atts <- att_gt(yname = "Median_Household_Income", # LHS variable
+atts <- att_gt(yname = "personal_income_per_capita", # LHS variable
                tname = "year", # time variable
                idname = "county_fips_code_num", # id variable
                gname = "treatment_year", # first treatment period variable
@@ -149,19 +183,14 @@ ggdid(agg_effects_es) +
   theme(legend.title = element_blank()) + 
   geom_hline(color = 'grey70', yintercept = 0) + 
   theme_classic() + 
-  labs(x = 'Years before/after treatment', y = 'Change in median household income',
-       title = 'Average effect of shale development on median household income',
+  labs(x = 'Years before/after treatment', y = 'Change in per capita income (LAPI)',
+       title = 'Average effect of shale development on per capita income (LAPI)',
        subtitle = 'Time-varying effects by length of exposure')  -> income_plot
 
 income_plot
 
-ggsave('shale-varying/Figures/Figure_X_Median_Household_Income_by_Length_of_Exposure.jpg')
+ggsave('shale-varying/Figures/Figure_X_LAPI_Income_by_Length_of_Exposure.jpg')
 
-# Notes: The pre-trends aren't perfect but they don't suggest that the effect started prior to the boom.
-# The effect of shale development on median household income is positive, large, and reasonably persistent,
-# growing over time after the boom starts. This makes sense. I'd like to breakdown the types of income that
-# are growing over time. Is this salary/wages? Or non-wage income? I suspect the latter is what makes up the
-# bulk of the persistent effects.
 
 # Figure 2: Dynamics of employment & shale development ------------------------
 
@@ -530,13 +559,11 @@ for(industry in c('construction', 'manufacturing', 'natural_resources', 'service
   
 }
 
-# (4) Alternative measure of income from BEA Local Area Personal Income -------------------------
-# Notes: Per Paredes et al. (2015), the BEA LAPI includes wage and non-wage income, the latter of which
-# is relevant to natural gas and oil leasing.
+# (4) Alternative measure of income from SAIPE -------------------------
+# Notes: Instead of the per capital personal income from BEA (which includes wage and non-wage income),
+# we here use median household income from the SAIPE
 
-# Run the model (Median Household Income)
-
-atts <- att_gt(yname = "personal_income_per_capita", # LHS variable
+atts <- att_gt(yname = "Median_Household_Income", # LHS variable
                tname = "year", # time variable
                idname = "county_fips_code_num", # id variable
                gname = "treatment_year", # first treatment period variable
@@ -571,15 +598,13 @@ ggdid(agg_effects_es) +
   theme(legend.title = element_blank()) + 
   geom_hline(color = 'grey70', yintercept = 0) + 
   theme_classic() + 
-  labs(x = 'Years before/after treatment', y = 'Change in per capita income (LAPI)',
-       title = 'Average effect of shale development on per capita income (LAPI)',
+  labs(x = 'Years before/after treatment', y = 'Change in median household income',
+       title = 'Average effect of shale development on median household income',
        subtitle = 'Time-varying effects by length of exposure')  -> income_plot
 
 income_plot
 
-ggsave('shale-varying/Figures/Figure_X_LAPI_Income_by_Length_of_Exposure.jpg')
-
-# Notes: 
+ggsave('shale-varying/Figures/Figure_X_Median_Household_Income_by_Length_of_Exposure.jpg')
 
 # Heterogeneity of treatment effects by characteristics -----------------------------
 # Notes: There is recent work on the use of causal forests in panel frameworks to understand treatment effect

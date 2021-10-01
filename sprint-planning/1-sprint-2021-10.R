@@ -18,7 +18,10 @@ october_sprint <- data.frame(
             'Push aggregate estimates into table for export into Excel', 'Build out models with explanatory variables',
             'Set up skeleton to evaluate heterogeneous treatment effects using double-ML', 
             'Push out aggregate estimates by early vs. late treatment counties into Excel',
-            'Add early-years worth of OASDI data')
+            'Add early-years worth of OASDI data'),
+  blockers = c('Decision on whether to emphasize resource curse?', 'None', 'Decision on whether to emphasize resource curse?',
+               'None', 'None', 'Need to reference literature on typical control variables', 'Refresh current state of causal forest lit.',
+               'None', 'Become a better scraper in Python')
 )
 
 # Add progress indicator

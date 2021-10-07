@@ -101,7 +101,7 @@ for(fff in c('lau_1995_2016', 'SEER_Population_Data_2000_2018', 'SAIPE_2000_2019
 
 # County data
 
-for(fff in c('USDA_ERS_Rural_Urban_Classification')) {
+for(fff in c('USDA_ERS_Rural_Urban_Classification', 'County_Area_Sq_Miles')) {
   
   temp <- readRDS(paste0('shale-varying/Scratch/', fff, '.rds'))
   
@@ -130,6 +130,12 @@ names(county_shp) %<>% str_replace_all(pattern = ' ', replacement = '_')
 # Add ZHVI (SFR) as logged variable
 
 county_shp %<>% mutate(zhvi_sfr_log = log(zhvi_sfr))
+
+# Add population, total and density
+
+county_shp %<>% mutate(population = black + white + other,
+                       population_ln = log(population),
+                       population_density = population / sq_miles)
 
 # Make disability_income a numeric variable and created interpolated/logged versions of them
 
@@ -160,6 +166,40 @@ county_shp %<>% filter(as.numeric(state_fips_code) <= 56)
 county_shp %<>% mutate_at(vars(annual_average_employment_construction, annual_average_employment_manufacturing, annual_average_employment_natural_resources,
                                annual_average_employment_service_providing),
                           funs(percent = . / annual_average_employment_all))
+
+# Add alternative timing based on # of wells drilled in county ---------------------------
+# County
+# Notes: We will estimate the year when a county had experienced, on a cumulative basis, 10 horizontal/directional wells drilled.
+
+county_shp %<>% arrange(county_fips_code, year) %>%
+  group_by(county_fips_code) %>%
+  mutate(hd_wells_cumulative = cumsum(hd_wells)) %>%
+  ungroup() %>%
+  mutate(hd_wells_cumulative_10 = ifelse(hd_wells_cumulative >= 10, 1, 0)) %>%
+  group_by(county_fips_code) %>%
+  mutate(hd_wells_cumulative_10 = cummax(hd_wells_cumulative_10)) %>%
+  ungroup()
+
+# (2) State
+# Notes: We will do the same as above but at the state-level. We will use 100 horizontal/directional wells.
+
+county_shp %>% group_by(year, state_fips_code) %>%
+  group_by(state_fips_code, year) %>%
+  summarise(hd_wells = sum(hd_wells, na.rm = TRUE)) %>%
+  ungroup() %>%
+  arrange(state_fips_code, year) %>%
+  group_by(state_fips_code) %>%
+  mutate(hd_wells_cumulative_state = cumsum(hd_wells)) %>%
+  ungroup() %>%
+  mutate(hd_wells_cumulative_state_250 = ifelse(hd_wells_cumulative_state >= 250, 1, 0)) %>%
+  group_by(state_fips_code) %>%
+  mutate(hd_wells_cumulative_state_250 = cummax(hd_wells_cumulative_state_250)) %>%
+  ungroup() %>%
+  dplyr::select(state_fips_code, year, hd_wells_cumulative_state_250) -> state_counts
+
+county_shp %<>% left_join(state_counts, by = c('state_fips_code', 'year'))
+
+rm(state_counts)
 
 # Save as analysis database --------------------------
 

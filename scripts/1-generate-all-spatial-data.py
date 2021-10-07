@@ -75,5 +75,14 @@ in_rows = os.path.join(box_dir + '/shale-varying/Scratch/' + 'Spatial_Data.gdb' 
 out_path= box_dir + '/shale-varying/Scratch/',
 out_name= 'USCB_County_to_DI_HD_Wells_5Miles' + '.csv')
 
+# Add square miles calculation to county shapefile
 
+arcpy.management.AddField(os.path.join(box_dir + "/shale-varying/Data/GIS/" + "tl_2020_us_county_prj.shp"),
+'sq_miles, 
+'DOUBLE)
+
+arcpy.management.CalculateField(os.path.join(box_dir + "/shale-varying/Data/GIS/" + "tl_2020_us_county_prj.shp"),
+'sq_miles', 
+'!shape.area@SQUAREMILES!',
+'PYTHON_9.3)
 

@@ -399,7 +399,7 @@ lapi %>% saveRDS('shale-varying/Scratch/LAPI_2000_2019.rds')
 # Local Area Unemployment Statistics ----------------------------------
 # Note: Use mapping function to download data from all vintages.
 
-# Add SAIPE folder
+# Add LAUS folder
 
 dir.create('shale-varying/Data/LAUS', showWarnings = FALSE)
 
@@ -528,9 +528,10 @@ qcew %>% saveRDS('shale-varying/Data/QCEW/QCEW_County_Data_2000_2018.rds')
 
 # Keep all, natural resources + mining, manufacturing, construciton, and services-providing
 
-qcew %<>% filter(naics %in% c(10, 1011, 1012, 1013, 102)) %>%
+qcew %<>% filter(naics %in% c(10, 101, 1011, 1012, 1013, 102)) %>%
   mutate(industry = case_when(
     naics == 10 ~ "all",
+    naics == 101 ~ 'goods_producing',
     naics == 1011 ~ "natural_resources",
     naics == 1012 ~ 'construction',
     naics == 1013 ~ 'manufacturing', 
@@ -1313,3 +1314,21 @@ county_adjacency %<>% group_by(county_fips_code) %>%
 # Save file as RDS file in Scratch folder
 
 county_adjacency %>% saveRDS('shale-varying/Scratch/County_Adjacency_Neighbor_Exposure_to_Shale.rds')
+
+# Add county acreage -----------------------------
+
+# Add shapefile from Data folder (see download above)
+
+county_area <- readOGR(dsn = 'shale-varying/Data/GIS',
+                       layer = 'tl_2020_us_county_prj') %>%
+  as.data.frame() %>%
+  dplyr::select(county_fips_code = GEOID, sq_miles) %>%
+  group_by(county_fips_code) %>%
+  summarise(sq_miles = sum(sq_miles, na.rm = TRUE)) %>%
+  ungroup() 
+
+# Save data point to scratch folder
+
+county_area %>% saveRDS('shale-varying/Scratch/County_Area_Sq_Miles.rds')
+
+

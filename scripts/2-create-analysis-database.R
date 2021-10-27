@@ -116,7 +116,6 @@ for(fff in c('USDA_ERS_Rural_Urban_Classification', 'County_Area_Sq_Miles')) {
 # Add explanatory variables -----------------------
 
 county_shp %<>% mutate(non_white_pop_percentage = (black + other) / (black + other + white),
-                       total_pop = black + other + white,
                        interaction_term = shale_county * post_shale,
                        state_fips_code = str_sub(county_fips_code, end = 2)) %>%
   group_by(state_fips_code) %>%
@@ -133,8 +132,7 @@ county_shp %<>% mutate(zhvi_sfr_log = log(zhvi_sfr))
 
 # Add population, total and density
 
-county_shp %<>% mutate(population = black + white + other,
-                       population_ln = log(population),
+county_shp %<>% mutate(population_ln = log(population),
                        population_density = population / sq_miles)
 
 # Make disability_income a numeric variable and created interpolated/logged versions of them
@@ -200,6 +198,38 @@ county_shp %>% group_by(year, state_fips_code) %>%
 county_shp %<>% left_join(state_counts, by = c('state_fips_code', 'year'))
 
 rm(state_counts)
+
+# Impute missing data for proportion of employment by industry -------------------------------
+
+# How much missing?
+
+county_shp %>% select(annual_average_employment_construction_percent:annual_average_employment_service_providing_percent) %>%
+  mutate_all(funs(ifelse(is.nan(.) | is.infinite(.), NA_real_, .))) %>%
+  summarise_all(funs(mean(is.na(.))))
+
+# <= 3% for the entire sample for manufacturing at the highest.
+# Notes: We'll forward-fill/backfill all missing data. Seems to occur for county-years with limited exposure to the given sector.
+# I need to mention this in the paper. For counties with a variable with ALL missing data, we assume NO exposure to that industry 
+# for the entire time period.
+
+county_shp %<>% 
+  mutate_at(vars(annual_average_employment_construction_percent:annual_average_employment_service_providing_percent),
+            funs(ifelse(is.nan(.) == TRUE | is.infinite(.) == TRUE, NA_real_, .))) %>%
+  mutate_at(vars(annual_average_employment_construction_percent:annual_average_employment_service_providing_percent),
+            funs(flag = ifelse(is.na(.) == TRUE, 1, 0))) %>%
+  arrange(county_fips_code, year) %>%
+  group_by(county_fips_code) %>%
+  mutate_at(vars(annual_average_employment_construction_percent:annual_average_employment_service_providing_percent),
+            funs(na.locf(., na.rm = FALSE))) %>%
+  ungroup() %>%
+  group_by(county_fips_code) %>%
+  mutate_at(vars(annual_average_employment_construction_percent:annual_average_employment_service_providing_percent),
+            funs(na.locf(., na.rm = FALSE, fromLast = TRUE))) %>%
+  ungroup() %>%
+  group_by(county_fips_code) %>%
+  mutate_at(vars(annual_average_employment_construction_percent:annual_average_employment_service_providing_percent),
+            funs(ifelse(is.na(.) == TRUE, 0, .))) %>%
+  ungroup()
 
 # Save as analysis database --------------------------
 

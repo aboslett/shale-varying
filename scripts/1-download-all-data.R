@@ -785,20 +785,39 @@ oil_and_gas_production_data %>% saveRDS('shale-varying/Scratch/County_Oil_and_Ga
 # SEER Population data ----------------------------------
 # Note: From the CDC SEER website, not NBER.
 
-# Download file
+# Downlaod file from SEER
+# Notes: From this link: https://seer.cancer.gov/popdata/yr1969_2019.19ages/us.1969_2019.19ages.adjusted.txt.gz
 
+url <- "https://seer.cancer.gov/popdata/yr1969_2019.19ages/us.1969_2019.19ages.adjusted.txt.gz"
 temp <- tempfile()
-download.file("https://data.nber.org/seer-pop/uswbo19agesadj.csv.zip",temp)
-recent_pop <- read_csv(unz(temp, "uswbo19agesadj.csv"))
-unlink(temp)
+download.file(url, temp)
 
-names(recent_pop) <-  c('year', 'state', 'state_fips', 'county_fips_code',
-                        'registry', 'race', 'origin', 'sex', 'age', 
-                        'population')
+seer_data <- read_csv(gzfile(temp), col_names = c('temp'))
+
+seer_data$temp %<>% as.character()
+
+# Split field into its component parts
+
+seer_data %<>% mutate(year = str_sub(temp, end = 4),
+                      state_abb = str_sub(temp, start = 5, end = 6),
+                      state_fips_code = str_sub(temp, start = 7, end = 8),
+                      county_fips_code = str_sub(temp, start = 9, end = 11),
+                      registry = str_sub(temp, start = 12, end = 13),
+                      race = str_sub(temp, start = 14, end = 14),
+                      origin = str_sub(temp, start = 15, end = 15),
+                      sex = str_sub(temp, start = 16, end = 16),
+                      age = str_sub(temp, start = 17, end = 18),
+                      population = str_sub(temp, start = 19))
+
+seer_data %<>% mutate(county_fips_code = paste0(state_fips_code, county_fips_code)) %>%
+  dplyr::select(year, county_fips_code, population, race) 
+
+seer_data %<>% mutate_at(vars(year, population, race),
+                         funs(as.numeric(.)))
 
 # Calculate population by race, year, and county FIPS code
 
-recent_pop %<>% group_by(county_fips_code, year, race) %>%
+seer_data %<>% group_by(county_fips_code, year, race) %>%
   summarise(population = sum(population)) %>%
   ungroup() %>%
   mutate(race = case_when(
@@ -808,13 +827,15 @@ recent_pop %<>% group_by(county_fips_code, year, race) %>%
   )) %>%
   dcast(county_fips_code + year ~ race, value.var = c('population'))
 
+seer_data %<>% mutate(population = white + black + other)
+
 # Filter post-2000
 
-recent_pop %<>% filter(year >= 2000)
+seer_data %<>% filter(year >= 2000)
 
 # Save as RDS file 
 
-recent_pop %>% saveRDS('shale-varying/Scratch/SEER_Population_Data_2000_2018.rds')
+seer_data %>% saveRDS('shale-varying/Scratch/SEER_Population_Data_2000_2018.rds')
 
 # SOI Tax Income data ---------------------------------
 # Notes: See Feyrer et al. (2017) (and associated comment from James & Smith). These data are based on residence

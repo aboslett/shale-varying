@@ -105,10 +105,14 @@ county_shp %>% filter(shale_state == 1) %>%
   filter(year %in% c(2000, 2012)) %>%
   mutate(`Post-Boom` = ifelse(year == 2000, 'Pre-Boom', 'Post-Boom'),
          shale_county = ifelse(shale_county == 1, 'Shale', 'Non-Shale')) %>%
+  mutate_at(vars(hd_wells, unemployment_rate, Median_Household_Income, 
+                 personal_income_per_capita, Poverty_Percent_All_Ages, zhvi_sfr,
+                 ends_with('_percent'), population, population_density),
+            funs(ifelse(is.nan(.) == TRUE | is.infinite(.) == TRUE, NA_real_, .))) %>%
   group_by(`Post-Boom`, shale_county) %>%
   summarise_at(vars(hd_wells, unemployment_rate, Median_Household_Income, 
                     personal_income_per_capita, Poverty_Percent_All_Ages, zhvi_sfr,
-                    contains('labor_share')),
+                    ends_with('_percent'), population, population_density),
                funs(mean(., na.rm = TRUE),
                     sd(., na.rm = TRUE))) %>%
   ungroup() %>%
@@ -116,18 +120,53 @@ county_shp %>% filter(shale_state == 1) %>%
   mutate(statistic = ifelse(str_detect(string = variable, pattern = 'mean') == TRUE, 'mean', 'sd'),
          variable = str_replace_all(string = variable, pattern = '\\_(mean|sd)$', replacement = '')) %>%
   dcast(variable ~ shale_county + `Post-Boom` + statistic, value.var = c('value')) %>%
-  mutate_at(vars(contains('mean'), contains('sd')),
-            funs(round(., 2))) %>%
   mutate(variable = case_when(
     variable == 'hd_wells' ~ '# of horizontal wells',
     variable == 'personal_income_per_capita' ~ 'Personal income, per capita',
     variable == 'Median_Household_Income' ~ 'Median household income',
     variable == 'unemployment_rate' ~ 'Unemployment rate',
     variable == 'Poverty_Percent_All_Ages' ~ 'All-ages poverty rate',
-    variable == 'zhvi_sfr' ~ 'Zillow ZHVI (SFR)'
+    variable == 'zhvi_sfr' ~ 'Zillow ZHVI (SFR)',
+    variable == 'population' ~ 'Population',
+    variable == 'population_density' ~ 'Population density (population/square miles)',
+    variable == 'annual_average_employment_construction_percent' ~ '% of employment in construction',
+    variable == 'annual_average_employment_manufacturing_percent' ~ '% of employment in manufacturing',
+    variable == 'annual_average_employment_natural_resources_percent' ~ '% of employment in natural resources',
+    variable == 'annual_average_employment_service_providing_percent' ~ '% of employment in service-providing sectors'
   )) %>%
-  dplyr::select(Variable = variable, contains('Pre'), contains('Post')) %>%
+  mutate(
+    `Normalized Difference, 2000` = (`Non-Shale_Pre-Boom_mean` - `Shale_Pre-Boom_mean`) / 
+      sqrt((`Non-Shale_Pre-Boom_sd` ^ 2) + (`Shale_Pre-Boom_sd` ^ 2)),
+    `Normalized Difference, 2012` = (`Non-Shale_Post-Boom_mean` - `Shale_Post-Boom_mean`) / 
+      sqrt((`Non-Shale_Post-Boom_sd` ^ 2) + (`Shale_Post-Boom_sd` ^ 2)),
+  ) %>%
+  mutate_at(vars(contains('mean'), contains('sd')),
+            funs(round(., 2))) %>%
+  dplyr::select(Variable = variable, contains('Pre'), contains('Post'), contains('Norm'),
+                -contains('sd')) %>%
   write_excel_csv('shale-varying/Scratch/Results/Table_1_Summary_Statistics.csv')
+
+# Show densities of drilling activity in 2012 --------------------------------
+
+# Generate drilling plot and export
+
+county_shp %<>% mutate(shale_county_character = ifelse(shale_county == 1,
+                                                       'Shale', 'Non-Shale'))
+
+temp_plot <- ggplot(data = subset(county_shp, year == 2012 & shale_state == 1),
+                    aes(x = log(hd_wells + 1), fill = shale_county_character)) + 
+  theme_classic() + 
+  labs(x = '# of horizontal wells drilled in 2012',
+       y = 'Density') + 
+  geom_density(alpha = 0.75) + 
+  theme(legend.title = element_blank()) + 
+  theme(legend.position = c(0.8, 0.8))
+
+temp_plot
+
+ggsave('shale-varying/Figures/Figure_X_Drilling_Activity_2012.jpg')
+
+rm(temp_plot)
 
 # Set up analysis database for CS package --------------------------
 
@@ -377,7 +416,91 @@ ggsave('shale-varying/Figures/Figure_X_Unemployment_Rate_by_Length_of_Exposure.j
 # though we have to remember that the 10-years post-treatment are essentially Barnett and Permian Basin, the latter of which really exploded
 # in that time period.
 
-# Figure 3: Dynamics of income & shale development, conditioned ----------------------------
+# Figure 3: Dynamics of income & shale development ---------------------------
+# Notes: Use natural logs.
+
+county_shp %<>% mutate(personal_income_per_capita_ln = log(personal_income_per_capita))
+
+# Run the model (per capita personal income)
+
+atts <- att_gt(yname = "personal_income_per_capita_ln", 
+               tname = "year", 
+               idname = "county_fips_code_num", 
+               gname = "treatment_year", 
+               data = county_shp, 
+               xformla = NULL, 
+               est_method = "dr", 
+               control_group = "nevertreated", 
+               bstrap = TRUE, 
+               biters = 1000, 
+               print_details = FALSE, 
+               clustervars = "county_fips_code_num", 
+               panel = TRUE)
+
+# Simple aggregations of ATT
+
+agg_effects <- aggte(atts, type = 'simple')
+
+summary(agg_effects)
+
+agg_effects %<>% tidy.AGGTEobj() %>%
+  dplyr::select(estimate, std.error) %>%
+  mutate(outcome_variable = 'personal_income_per_capita',
+         adjusted_model = 'unconditioned, natural logs') %>%
+  mutate(confidence_interval_low_95 = estimate - (1.96 * std.error),
+         confidence_interval_high_95 = estimate + (1.96 * std.error))
+
+simple_aggregation %<>% bind_rows(agg_effects)
+
+rm(agg_effects)
+
+# Aggregate ATT
+
+agg_effects <- aggte(atts, type = "group")
+
+summary(agg_effects)
+
+# Set up calendar
+
+agg.ct <- aggte(atts, type = "calendar")
+summary(agg.ct)
+
+# Calendar-based plot
+
+ggdid(agg.ct) + 
+  geom_hline(color = 'grey70', yintercept = 0) + 
+  theme_classic() + 
+  labs(x = 'Year', y = 'Change in per capita income (LAPI)',
+       title = 'Average effect of shale development on per capita income (LAPI) in natural logs',
+       subtitle = 'Time-varying effects by length of exposure') + 
+  theme(legend.position="none") + 
+  scale_color_manual(values = c('dodgerblue')) -> income_plot
+
+income_plot
+
+ggsave('shale-varying/Figures/Figure_X_LAPI_Income_by_Calendar_ln.jpg')
+
+# Event-study graph
+
+agg_effects_es <- aggte(atts, type = "dynamic")
+summary(agg_effects_es)
+
+# Plot event-study coefficients
+
+ggdid(agg_effects_es) + 
+  geom_hline(color = 'grey70', yintercept = 0) + 
+  theme_classic() + 
+  labs(x = 'Years before/after treatment', y = 'Change in per capita income (LAPI)',
+       title = 'Average effect of shale development on per capita income (LAPI) in natural logs',
+       subtitle = 'Time-varying effects by calendar time') + 
+  theme(legend.title = element_blank()) -> income_plot
+
+income_plot
+
+ggsave('shale-varying/Figures/Figure_X_LAPI_Income_by_Length_of_Exposure_ln.jpg')
+
+
+# Figure 4: Dynamics of income & shale development, conditioned ----------------------------
 
 temp <- county_shp %>% filter(!is.na(population))
 
@@ -388,7 +511,9 @@ atts <- att_gt(yname = "personal_income_per_capita",
                idname = "county_fips_code_num", 
                gname = "treatment_year", 
                data = temp, 
-               xformla = ~population + population_density, # plus covariates
+               xformla = ~population + population_density + 
+                 annual_average_employment_construction_percent + annual_average_employment_manufacturing_percent + 
+                 annual_average_employment_natural_resources_percent + annual_average_employment_service_providing_percent, # plus covariates
                est_method = "dr", 
                control_group = 'nevertreated', 
                bstrap = TRUE, 
@@ -459,7 +584,7 @@ income_plot
 
 ggsave('shale-varying/Figures/Figure_X_LAPI_Income_by_Length_of_Exposure_Cdnt.jpg')
 
-# Figure 4: Dynamics of employment & shale development, conditioned ------------------------
+# Figure 5: Dynamics of employment & shale development, conditioned ------------------------
 
 # Only those with population data
 
@@ -472,7 +597,9 @@ employment_atts <- att_gt(yname = "unemployment_rate",
                           idname = "county_fips_code_num", 
                           gname = "treatment_year", 
                           data = temp, 
-                          xformla = ~population + population_density, # plus covariates
+                          xformla = ~population + population_density + 
+                            annual_average_employment_construction_percent + annual_average_employment_manufacturing_percent + 
+                            annual_average_employment_natural_resources_percent + annual_average_employment_service_providing_percent, # plus covariates
                           est_method = "dr", 
                           control_group = 'nevertreated', 
                           bstrap = TRUE, 
@@ -541,6 +668,91 @@ ggdid(employment_effects_es) +
 unemployment_plot
 
 ggsave('shale-varying/Figures/Figure_X_Unemployment_Rate_by_Length_of_Exposure_Cdnt.jpg')
+
+# Figure 6: Dynamics of income & shale development ---------------------------
+# Notes: Use natural logs.
+
+temp <- county_shp %>% filter(!is.na(population))
+
+# Run the model (per capita personal income)
+
+atts <- att_gt(yname = "personal_income_per_capita_ln", 
+               tname = "year", 
+               idname = "county_fips_code_num", 
+               gname = "treatment_year", 
+               data = temp, 
+               xformla = ~population + population_density + 
+                 annual_average_employment_construction_percent + annual_average_employment_manufacturing_percent + 
+                 annual_average_employment_natural_resources_percent + annual_average_employment_service_providing_percent, # plus covariates
+               est_method = "dr", 
+               control_group = "nevertreated", 
+               bstrap = TRUE, 
+               biters = 1000, 
+               print_details = FALSE, 
+               clustervars = "county_fips_code_num", 
+               panel = TRUE)
+
+# Simple aggregations of ATT
+
+agg_effects <- aggte(atts, type = 'simple')
+
+summary(agg_effects)
+
+agg_effects %<>% tidy.AGGTEobj() %>%
+  dplyr::select(estimate, std.error) %>%
+  mutate(outcome_variable = 'personal_income_per_capita',
+         adjusted_model = 'conditioned, natural logs') %>%
+  mutate(confidence_interval_low_95 = estimate - (1.96 * std.error),
+         confidence_interval_high_95 = estimate + (1.96 * std.error))
+
+simple_aggregation %<>% bind_rows(agg_effects)
+
+rm(agg_effects)
+
+# Aggregate ATT
+
+agg_effects <- aggte(atts, type = "group")
+
+summary(agg_effects)
+
+# Set up calendar
+
+agg.ct <- aggte(atts, type = "calendar")
+summary(agg.ct)
+
+# Calendar-based plot
+
+ggdid(agg.ct) + 
+  geom_hline(color = 'grey70', yintercept = 0) + 
+  theme_classic() + 
+  labs(x = 'Year', y = 'Change in per capita income (LAPI)',
+       title = 'Average effect of shale development on per capita income (LAPI) in natural logs',
+       subtitle = 'Time-varying effects by length of exposure') + 
+  theme(legend.position="none") + 
+  scale_color_manual(values = c('dodgerblue')) -> income_plot
+
+income_plot
+
+ggsave('shale-varying/Figures/Figure_X_LAPI_Income_by_Calendar_ln_c.jpg')
+
+# Event-study graph
+
+agg_effects_es <- aggte(atts, type = "dynamic")
+summary(agg_effects_es)
+
+# Plot event-study coefficients
+
+ggdid(agg_effects_es) + 
+  geom_hline(color = 'grey70', yintercept = 0) + 
+  theme_classic() + 
+  labs(x = 'Years before/after treatment', y = 'Change in per capita income (LAPI)',
+       title = 'Average effect of shale development on per capita income (LAPI) in natural logs',
+       subtitle = 'Time-varying effects by calendar time') + 
+  theme(legend.title = element_blank()) -> income_plot
+
+income_plot
+
+ggsave('shale-varying/Figures/Figure_X_LAPI_Income_by_Length_of_Exposure_ln_c.jpg')
 
 # Robustness checks -------------------------------------
 # (1) Drop neighboring counties to reduce spillover --------------------------
@@ -1346,10 +1558,93 @@ ggsave('shale-varying/Figures/Figure_X_ZHVI_SFR_by_Length_of_Exposure.jpg')
 
 # Notes: Major pre-trends.
 
-# Heterogeneity of treatment effects by characteristics -----------------------------
-# Notes: There is recent work on the use of causal forests in panel frameworks to understand treatment effect
-# heterogeneity. I think we can also use the individual TEs estimated from the methods outlined in Callaway/Sant'Anna
-# to extract 
-# (1) Income
-# (2) Employment
-# (3) Zillow SFR
+# (6) Levels of employment & establishments by sector --------------------------
+
+for(variable_name in c('annual_average_employment_all', 'annual_average_employment_construction', 
+                       'annual_average_employment_manufacturing', 'annual_average_employment_natural_resources',
+                       'annual_average_employment_service_providing')) {
+  
+  
+  # Filter out counties with population data
+  
+  temp <- county_shp %>% filter(!is.na(population))
+  
+  # Run the model (per capita personal income)
+  
+  atts <- att_gt(yname = variable_name, 
+                 tname = "year", 
+                 idname = "county_fips_code_num", 
+                 gname = "treatment_year", 
+                 data = temp, 
+                 xformla = ~population + population_density, # plus covariates
+                 est_method = "dr", 
+                 control_group = "nevertreated", 
+                 bstrap = TRUE, 
+                 biters = 1000, 
+                 print_details = FALSE, 
+                 clustervars = "county_fips_code_num", 
+                 panel = TRUE)
+  
+  # Simple aggregations of ATT
+  
+  agg_effects <- aggte(atts, type = 'simple')
+  
+  summary(agg_effects)
+  
+  agg_effects %<>% tidy.AGGTEobj() %>%
+    dplyr::select(estimate, std.error) %>%
+    mutate(outcome_variable = variable_name,
+           adjusted_model = 'conditioned') %>%
+    mutate(confidence_interval_low_95 = estimate - (1.96 * std.error),
+           confidence_interval_high_95 = estimate + (1.96 * std.error))
+  
+  simple_aggregation %<>% bind_rows(agg_effects)
+  
+  rm(agg_effects)
+  
+  # Aggregate ATT
+  
+  agg_effects <- aggte(atts, type = "group")
+  
+  summary(agg_effects)
+  
+  # Set up calendar
+  
+  agg.ct <- aggte(atts, type = "calendar")
+  summary(agg.ct)
+  
+  # Calendar-based plot
+  
+  ggg <- variable_name %>% str_replace_all(pattern = '\\_', replacement = ' ') %>%
+    str_to_title()
+  
+  ggdid(agg.ct) + 
+    geom_hline(color = 'grey70', yintercept = 0) + 
+    theme_classic() + 
+    labs(x = 'Year', y = ggg,) + 
+    theme(legend.position="none") + 
+    scale_color_manual(values = c('dodgerblue')) -> income_plot
+  
+  income_plot
+  
+  ggsave(paste0('shale-varying/Figures/Figure_X_', variable_name, '_by_C_c.jpg'))
+  
+  # Event-study graph
+  
+  agg_effects_es <- aggte(atts, type = "dynamic")
+  summary(agg_effects_es)
+  
+  # Plot event-study coefficients
+  
+  ggdid(agg_effects_es) + 
+    geom_hline(color = 'grey70', yintercept = 0) + 
+    theme_classic() + 
+    labs(x = 'Years before/after treatment', y = ggg) + 
+    theme(legend.title = element_blank()) -> income_plot
+  
+  income_plot
+  
+  ggsave(paste0('shale-varying/Figures/Figure_X_', variable_name, '_by_L_Exposure_c.jpg'))
+  
+}
+

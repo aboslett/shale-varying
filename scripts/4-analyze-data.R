@@ -1648,3 +1648,17 @@ for(variable_name in c('annual_average_employment_all', 'annual_average_employme
   
 }
 
+
+# Extra analyses -----------------------------
+# Proportion of wells in non-metro counties
+
+county_shp %>% filter(year >= 2000 & year <= 2017) %>%
+  summarise(hd_wells = sum(hd_wells, na.rm = TRUE)) %>% pull() -> all_wells
+
+county_shp %>% filter(year >= 2000 & year <= 2017) %>%
+  filter(metro == 0) %>%
+  summarise(hd_wells = sum(hd_wells, na.rm = TRUE)) %>% pull() -> rural_wells
+
+rural_wells / all_wells
+
+
